@@ -1,8 +1,8 @@
 CXX = g++
 CXXFLAGS = -Wall -std=c++17
-LIBS = -lserialport -ljsoncpp -lcurl
+LIBS = -lserialport -ljsoncpp -lcurl -lreadline
 
-SRC = src/main.cpp src/config.cpp src/serial_handler.cpp src/ollama_client.cpp
+SRC = src/utils.cpp src/main.cpp src/config_loader.cpp src/serial_handler.cpp src/ollama_client.cpp
 OBJ = $(SRC:.cpp=.o)
 INCLUDE = -Iinclude
 

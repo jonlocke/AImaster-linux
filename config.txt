@@ -1,4 +1,4 @@
-SERIAL_PORT=COM6
-BAUDRATE=2400
-OLLAMA_URL=http://localhost:11434/api/chat
-MODEL=gemma3:4b
+serial_port=/dev/ttyUSB0
+baudrate=2400
+ollama_url=http://localhost:11434/api/chat
+ollama_model=gemma3:4b

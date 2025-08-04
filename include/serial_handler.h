@@ -1,23 +1,18 @@
-#pragma once
+#ifndef SERIAL_HANDLER_H
+#define SERIAL_HANDLER_H
+
 #include <string>
-#include <libserialport.h>
-#include "config.h"
-#include "serial_handler.h"
-#include <iostream>
+#include "config_loader.h"
 
-#if !defined(_WIN32)
-#include <filesystem>
-#include <vector>  // ✅ Added for std::vector
-#endif
-
-extern struct sp_port* port;
 extern bool serial_available;
-extern std::string detected_port;
 
-bool initSerial(const AppConfig& config);
+// Initialize serial connection with port and baudrate
+bool initSerial(const std::string& port, int baudrate);
+
+// Send a string over serial (if available)
+void serialSend(const std::string& data);
+
+// Close serial connection
 void closeSerial();
-void sendCommand(const std::string& command);
-std::string receiveCommand();
-#ifndef _WIN32
-std::string autoDetectSerialPort();
+
 #endif
