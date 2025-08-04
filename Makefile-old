@@ -1,0 +1,32 @@
+# Makefile for ollama_cli
+
+# Compiler and flags
+CXX = g++
+CXXFLAGS = -std=c++17 -Wall -g # -Wall enables more warnings, -g for debugging
+
+# Source files
+SOURCES = main.cpp ollama_cli.cpp
+
+# Object files
+OBJECTS = $(SOURCES:.cpp=.o)
+
+# Executable name
+TARGET = ollama_cli
+
+# Default target
+all: $(TARGET)
+
+# Rule to create the executable
+$(TARGET): $(OBJECTS)
+	$(CXX) $(OBJECTS) -o $(TARGET)
+
+# Rule to compile .cpp files to .o files
+%.o: %.cpp
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+# Clean target to remove object files and the executable
+clean:
+	rm -f $(OBJECTS) $(TARGET)
+
+# Phony targets (targets that don't represent actual files)
+.PHONY: all clean
