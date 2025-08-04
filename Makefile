@@ -1,27 +1,25 @@
-# Compiler
 CXX = g++
 CXXFLAGS = -Wall -std=c++17
+LIBS = -lserialport -ljsoncpp -lcurl
 
-# Libraries
-LIBS = -lserialport -ljsoncpp
-
-# Project files
-SRC = main.cpp
+SRC = src/main.cpp src/config.cpp src/serial_handler.cpp src/ollama_client.cpp
 OBJ = $(SRC:.cpp=.o)
+INCLUDE = -Iinclude
+
 TARGET = ollama_cli
 
-# Build target
 all: $(TARGET)
 
 $(TARGET): $(OBJ)
 	$(CXX) $(CXXFLAGS) -o $@ $^ $(LIBS)
 
 %.o: %.cpp
-	$(CXX) $(CXXFLAGS) -c $< -o $@
+	$(CXX) $(CXXFLAGS) $(INCLUDE) -c $< -o $@
 
-# Clean build files
 clean:
 	rm -f $(OBJ) $(TARGET)
 
-.PHONY: all clean
+run: $(TARGET)
+	./$(TARGET)
 
+.PHONY: all clean run

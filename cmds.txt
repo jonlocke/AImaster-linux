@@ -1,0 +1,3 @@
+WHO=Shows current configuration
+ASK=Ask Ollama a question
+HELP=Show available commands

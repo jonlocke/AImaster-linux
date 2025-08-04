@@ -1,0 +1,4 @@
+SERIAL_PORT=COM6
+BAUDRATE=2400
+OLLAMA_URL=http://localhost:11434/api/generate
+MODEL=gemma3:4b
