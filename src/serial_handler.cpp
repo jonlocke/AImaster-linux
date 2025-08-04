@@ -1,8 +1,10 @@
 #include "serial_handler.h"
 #include <iostream>
+#include <fstream>
 
 #if !defined(_WIN32)
 #include <filesystem>
+#include <vector> // ✅ Remembered fix
 #endif
 
 struct sp_port* port = nullptr;
@@ -53,7 +55,10 @@ void sendCommand(const std::string& command) {
     if (serial_available) {
         sp_nonblocking_write(port, command.c_str(), command.size());
     } else {
-        std::cout << "[Console Mode] Sending: " << command << std::endl;
+        std::ofstream log("log.txt", std::ios::app);
+        if (log.is_open()) {
+            log << "[Console Mode] Sending: " << command << std::endl;
+        }
     }
 }
 

@@ -20,9 +20,12 @@ int main() {
         sendCommand(command);
         Json::Value result = processCommand(command, config);
 
-        Json::StreamWriterBuilder writer;
-        writer["indentation"] = "  ";
-        std::cout << Json::writeString(writer, result) << std::endl;
+        // ✅ Only print JSON if serial is available
+        if (serial_available) {
+            Json::StreamWriterBuilder writer;
+            writer["indentation"] = "  ";
+            std::cout << Json::writeString(writer, result) << std::endl;
+        }
     }
 
     closeSerial();
