@@ -1,12 +1,2 @@
-    1  apt-get -y update
-    2  apt install g++ -y
-   13  apt-cache search nlohmann
-   14  apt install nlohmann-json3-dev
-   25  apt whatprovides
-   26  apt-cache search serialport.h
-   27  apt-cache search libserial
-   28  apt install libserial-dev libserial-doc
-   31  apt install libserialport-dev libserial-doc
-   32  apt install libserialport-dev libserialport-doc
-apt-install make
-apt install libjsoncpp-dev
+#!/bin/bash
+apt-get -y update; apt-get install -y g++ libserialport-dev make libjsoncpp-dev
