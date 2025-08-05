@@ -3,3 +3,4 @@ READ=Provide context and send the contents of a file to the model for absorption
 RESET=Clear the current chat history (useful to start a fresh conversation).
 WHO=Show current configuration information.
 HELP=List available commands.
+INT=Interactve mode

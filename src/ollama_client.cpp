@@ -1,330 +1,118 @@
 #include "ollama_client.h"
-#include <curl/curl.h>
-#include <algorithm>
+#include "config_loader.h"
+#include "chat_session.h"
 #include <iostream>
-#include <sstream>
-#include <fstream>
-#include <filesystem>
+#include <iomanip>
+#include <string>
+#include <vector>
 #include <ctime>
-#include "serial_handler.h"
+#include <algorithm>
+#include <curl/curl.h>
+#include <jsoncpp/json/json.h>
+#include <readline/readline.h>
+#include <readline/history.h>
 
-struct StreamData {
-    std::string collected;
-    std::string raw_output;
-};
+extern AppConfig config;
 
-static bool diagMode = false; // Diagnostic dump mode
+static std::string get_timestamp() {
+    std::time_t t = std::time(nullptr);
+    std::tm tm_local{};
+    localtime_r(&t, &tm_local);
+    char buf[20];
+    std::strftime(buf, sizeof(buf), "[%I:%M:%S %p]", &tm_local);
+    return std::string(buf);
+}
 
-// ---- Save Code Blocks ----
-namespace {
-    void saveCodeBlocks(const std::string& text) {
-        namespace fs = std::filesystem;
-        std::string delimiter = "```";
-        size_t pos = 0;
-        int blockCount = 0;
+static size_t write_callback(void *contents, size_t size, size_t nmemb, void *userp) {
+    ((std::string*)userp)->append((char*)contents, size * nmemb);
+    return size * nmemb;
+}
 
-        while ((pos = text.find(delimiter, pos)) != std::string::npos) {
-            size_t start = pos + delimiter.length();
-            size_t end = text.find(delimiter, start);
-            if (end == std::string::npos) break;
+void start_console_mode(AppConfig &cfg) {
+    std::string input;
+    while (true) {
+        std::string prompt_str = "8[" + current_model + "]-> ";
+        char *raw_input = readline(prompt_str.c_str());
+        if (!raw_input) break; // NULL from readline means EOF / Ctrl-D
+        input = raw_input;
+        free(raw_input);
 
-            std::string codeBlock = text.substr(start, end - start);
-            codeBlock.erase(0, codeBlock.find_first_not_of(" \t\n\r"));
-            codeBlock.erase(codeBlock.find_last_not_of(" \t\n\r") + 1);
+        if (input.empty()) continue;
+        add_history(input.c_str());
 
-            // Prepend "# " to the first line
-            if (!codeBlock.empty()) {
-                size_t newlinePos = codeBlock.find('\n');
-                if (newlinePos != std::string::npos) {
-                    codeBlock.insert(0, "# ");
-                } else {
-                    codeBlock = "# " + codeBlock;
+        std::string cmd_lower = input;
+        std::transform(cmd_lower.begin(), cmd_lower.end(), cmd_lower.begin(), ::tolower);
+
+        if (cmd_lower == "quit") {
+            std::cout << get_timestamp() << " [Exiting...]" << std::endl;
+            break;
+        } else if (cmd_lower == "showchat") {
+            if (conversation_history.empty()) {
+                std::cout << "[Conversation history is empty]" << std::endl;
+            } else {
+                for (auto &msg : conversation_history) {
+                    std::string role_color = cfg.color_system;
+                    if (msg.role == "user") role_color = cfg.color_user;
+                    else if (msg.role == "assistant") role_color = cfg.color_assistant;
+                    std::cout << get_timestamp() << " ";
+                    if (cfg.color_enabled)
+                        std::cout << "\033[1m" << role_color << msg.role << ":" << cfg.color_reset << " " << role_color << msg.content << cfg.color_reset << "\n";
+                    else
+                        std::cout << msg.role << ": " << msg.content << "\n";
                 }
             }
-
-            fs::create_directories("code");
-
-            std::time_t t = std::time(nullptr);
-            std::tm tm{};
-        #if defined(_WIN32)
-            localtime_s(&tm, &t);
-        #else
-            localtime_r(&t, &tm);
-        #endif
-            char filename[64];
-            std::strftime(filename, sizeof(filename), "code/%Y%m%d_%H%M%S", &tm);
-
-            std::ostringstream oss;
-            oss << filename;
-            if (blockCount > 0) oss << "_" << blockCount;
-            oss << ".txt";
-
-            std::ofstream outFile(oss.str());
-            if (outFile.is_open()) {
-                outFile << codeBlock;
-                outFile.close();
-                std::cout << "[Saved code block to " << oss.str() << "]\n";
-            }
-
-            blockCount++;
-            pos = end + delimiter.length();
+        } else {
+            // Send to LLM
+            conversation_history.push_back({"user", input});
+            std::string assistant_reply;
+            send_llm_request(cfg, input, assistant_reply);
+            conversation_history.push_back({"assistant", assistant_reply});
         }
     }
 }
 
-// ---- Streaming Callback ----
-static size_t StreamCallback(void* contents, size_t size, size_t nmemb, void* userp) {
-    size_t totalSize = size * nmemb;
-    std::string chunk((char*)contents, totalSize);
+void send_llm_request(AppConfig &cfg, const std::string &prompt, std::string &full_response) {
+    CURL *curl = curl_easy_init();
+    if (!curl) return;
 
-    if (diagMode) {
-        std::cerr << "\n[DIAG CHUNK] " << chunk << std::endl;
+    Json::Value root;
+    root["model"] = current_model;
+    root["messages"] = Json::arrayValue;
+    for (auto &msg : conversation_history) {
+        Json::Value m;
+        m["role"] = msg.role;
+        m["content"] = msg.content;
+        root["messages"].append(m);
     }
 
-    StreamData* data = (StreamData*)userp;
-    data->raw_output += chunk;
+    Json::StreamWriterBuilder writer;
+    std::string json_data = Json::writeString(writer, root);
 
-    Json::CharReaderBuilder reader;
-    Json::Value parsed;
-    std::string errs;
-    std::istringstream ss(chunk);
-
-    if (Json::parseFromStream(reader, ss, &parsed, &errs)) {
-        if (parsed.isObject() &&
-            parsed.isMember("message") &&
-            parsed["message"].isObject() &&
-            parsed["message"].isMember("content")) {
-
-            std::string text = parsed["message"]["content"].asString();
-            std::cout << text << std::flush;
-
-            if (!serial_available) {
-                std::ofstream log("log.txt", std::ios::app);
-                if (log.is_open()) {
-                    log << text;
-                    log.flush();
-                }
-            }
-            data->collected += text;
-        }
-    }
-    return totalSize;
-}
-
-// ---- Helper for common curl options ----
-static void setCurlStreamingOptions(CURL* curl, struct curl_slist*& headers) {
-    curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
-    curl_easy_setopt(curl, CURLOPT_TCP_NODELAY, 1L);
+    std::string response_string;
+    struct curl_slist *headers = nullptr;
     headers = curl_slist_append(headers, "Content-Type: application/json");
-    headers = curl_slist_append(headers, "Expect:");
+
+    curl_easy_setopt(curl, CURLOPT_URL, cfg.ollama_url.c_str());
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, StreamCallback);
-}
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_data.c_str());
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_string);
+    curl_easy_perform(curl);
 
-// ---- Send message to Ollama ----
-static bool sendMessageToOllama(const std::string& query,
-                                std::vector<Json::Value>& chatHistory,
-                                const AppConfig& config) {
-    Json::Value msg;
-    msg["role"] = "user";
-    msg["content"] = query;
-    chatHistory.push_back(msg);
-
-    CURL* curl = curl_easy_init();
-    if (!curl) return false;
-
-    StreamData streamData;
-    Json::Value payload;
-    payload["model"] = config.ollama_model;
-    payload["messages"] = Json::arrayValue;
-    for (auto& m : chatHistory) payload["messages"].append(m);
-    payload["stream"] = true;
-
-    Json::StreamWriterBuilder wbuilder;
-    std::string jsonPayload = Json::writeString(wbuilder, payload);
-
-    if (diagMode) {
-        std::cerr << "\n[DIAG URL] " << config.ollama_url << "\n";
-        std::cerr << "[DIAG PAYLOAD] " << jsonPayload << "\n";
-    }
-    std::cout << "[Thinking..]" << std::endl;
-
-    curl_easy_setopt(curl, CURLOPT_URL, config.ollama_url.c_str());
-    curl_easy_setopt(curl, CURLOPT_POST, 1L);
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, jsonPayload.c_str());
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &streamData);
-
-    struct curl_slist* headers = NULL;
-    setCurlStreamingOptions(curl, headers);
-
-    CURLcode res = curl_easy_perform(curl);
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
 
-    std::cout << std::endl;
-
-    if (res == CURLE_OK && !streamData.collected.empty()) {
-        Json::Value reply;
-        reply["role"] = "assistant";
-        reply["content"] = streamData.collected;
-        chatHistory.push_back(reply);
-
-        saveCodeBlocks(streamData.collected);
-        return true;
-    }
-
-    return false;
-}
-
-// ---- Process Command ----
-Json::Value processCommand(const std::string& command, const AppConfig& config) {
-    static std::vector<Json::Value> chatHistory;
-    Json::Value result;
-
-    std::string cmd_upper = command;
-    std::transform(cmd_upper.begin(), cmd_upper.end(), cmd_upper.begin(), ::toupper);
-
-    // ===== ASK =====
-    if (cmd_upper == "ASK" || cmd_upper.rfind("ASK ", 0) == 0) {
-        std::string query;
-        if (cmd_upper == "ASK") {
-            std::cout << "Enter your question: ";
-            std::getline(std::cin, query);
-        } else {
-            query = command.substr(4);
-        }
-        sendMessageToOllama(query, chatHistory, config);
-        result["status"] = "success";
-    }
-
-    // ===== INT (interactive mode) =====
-    else if (cmd_upper == "INT") {
-        std::cout << "[Interactive mode] Type your messages. Type /bye to exit.\n";
-        std::string line;
-        while (true) {
-            std::cout << "-> ";
-            if (!std::getline(std::cin, line)) break;
-            if (line == "/bye") {
-                std::cout << "[Returning to main prompt]\n";
-                break;
-            }
-            sendMessageToOllama(line, chatHistory, config);
-        }
-        result["status"] = "success";
-    }
-
-    // ===== READ =====
-    else if (cmd_upper == "READ" || cmd_upper.rfind("READ_CTX:", 0) == 0) {
-        std::string context;
-        std::string filename;
-
-        if (cmd_upper.rfind("READ_CTX:", 0) == 0) {
-            size_t ctxPos = command.find(":") + 1;
-            size_t filePos = command.find("|FILE:");
-            context = command.substr(ctxPos, filePos - ctxPos);
-            filename = command.substr(filePos + 6);
-        } else {
-            std::cout << "Enter context: ";
-            std::getline(std::cin, context);
-            std::cout << "Enter filename: ";
-            std::getline(std::cin, filename);
-        }
-
-        if (!std::filesystem::exists(filename)) {
-            std::cout << "[Error] File does not exist: " << filename << std::endl;
-            result["status"] = "error";
-            return result;
-        }
-        if (std::filesystem::is_empty(filename)) {
-            std::cout << "[Error] File is empty: " << filename << std::endl;
-            result["status"] = "error";
-            return result;
-        }
-
-        std::ifstream inFile(filename);
-        std::stringstream buffer;
-        buffer << inFile.rdbuf();
-        std::string fileContents = buffer.str();
-
-        std::string fullMessage =
-            "Context: " + context +
-            "\n\nFile contents:\n" + fileContents +
-            "\n\nInstruction: Please read and store this content for later reference in our ongoing conversation. "
-            "Acknowledge once you have absorbed it.";
-
-        sendMessageToOllama(fullMessage, chatHistory, config);
-        result["status"] = "success";
-    }
-
-    // ===== WHO =====
-    else if (cmd_upper == "WHO") {
-        result["status"] = "success";
-        result["serial_port"] = config.serial_port;
-        result["baudrate"] = config.baudrate;
-        result["ollama_url"] = config.ollama_url;
-        result["ollama_model"] = config.ollama_model;
-    }
-
-    // ===== HELP =====
-    else if (cmd_upper == "HELP") {
-        result["status"] = "success";
-        Json::Value cmds(Json::objectValue);
-        if (!config.commands.empty()) {
-            for (const auto& [cmd, desc] : config.commands) {
-                cmds[cmd] = desc;
-            }
-        } else {
-            cmds["ASK"] = "Ask the model a question.";
-            cmds["INT"] = "Enter interactive mode with the model.";
-            cmds["READ"] = "Send a file with context to the model.";
-            cmds["RESET"] = "Clear chat history.";
-            cmds["WHO"] = "Show current configuration.";
-            cmds["HELP"] = "List available commands.";
-            cmds["DIAG"] = "Toggle diagnostic mode.";
-        }
-        result["commands"] = cmds;
-        std::cout << "\nAvailable commands:\n";
-        for (auto& key : cmds.getMemberNames()) {
-            std::cout << "  " << key << " - " << cmds[key].asString() << "\n";
+    Json::CharReaderBuilder reader;
+    Json::Value root_resp;
+    std::string errs;
+    std::istringstream s(response_string);
+    if (Json::parseFromStream(reader, s, &root_resp, &errs)) {
+        if (root_resp.isMember("choices") && root_resp["choices"].isArray() && !root_resp["choices"].empty()) {
+            full_response = root_resp["choices"][0]["message"]["content"].asString();
+            if (cfg.color_enabled)
+                std::cout << cfg.color_assistant << full_response << cfg.color_reset << std::endl;
+            else
+                std::cout << full_response << std::endl;
         }
     }
-
-    // ===== DIAG =====
-    else if (cmd_upper.rfind("DIAG", 0) == 0) {
-        std::string arg;
-        if (command.size() > 4) {
-            arg = command.substr(5);
-            std::transform(arg.begin(), arg.end(), arg.begin(), ::toupper);
-        }
-        if (arg == "ON") diagMode = true;
-        else if (arg == "OFF") diagMode = false;
-        else if (arg.empty()) diagMode = !diagMode;
-
-        std::cout << "[Diagnostic mode " << (diagMode ? "ON" : "OFF") << "]\n";
-        result["status"] = "success";
-    }
-
-    // ===== RESET =====
-    else if (cmd_upper == "RESET") {
-        chatHistory.clear();
-        result["status"] = "success";
-        result["message"] = "Chat history cleared.";
-    }
-
-    // ===== Default =====
-    else {
-        result["status"] = "success";
-        result["message"] = "Command: " + command;
-    }
-
-    if (!serial_available) {
-        std::ofstream log("log.txt", std::ios::app);
-        if (log.is_open()) {
-            Json::StreamWriterBuilder writer;
-            writer["indentation"] = "  ";
-            log << Json::writeString(writer, result) << std::endl;
-        }
-    }
-
-    return result;
 }

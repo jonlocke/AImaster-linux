@@ -5,6 +5,8 @@
 #include "config_loader.h"
 
 extern bool serial_available;
+bool start_serial_mode(AppConfig &config);
+
 
 // Initialize serial connection with port and baudrate
 bool initSerial(const std::string& port, int baudrate);

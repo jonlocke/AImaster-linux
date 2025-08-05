@@ -1,4 +1,13 @@
-serial_port=/dev/ttyUSB0
-baudrate=2400
-ollama_url=http://localhost:11434/api/chat
-ollama_model=gemma3:4b
+ollama_url = http://localhost:11434/api/chat
+ollama_model = gemma3:4b
+serial_port = /dev/ttyUSB0
+baudrate = 115200
+system_message = You are AImaster, a helpful and knowledgeable assistant.
+color_enabled = true
+color_user = \033[38;5;208m
+color_assistant = \033[32m
+color_system = \033[34m
+color_warning = \033[33m
+color_error = \033[31m
+color_timestamp = \033[90m
+color_reset = \033[0m

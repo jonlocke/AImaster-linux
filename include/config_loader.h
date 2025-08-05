@@ -9,15 +9,19 @@ struct AppConfig {
     int baudrate = 0;
     std::string ollama_url;
     std::string ollama_model;
-    std::map<std::string, std::string> commands; // command -> description
+    std::string system_message;
+    bool color_enabled = true;
+    std::string color_user = "\033[38;5;208m";
+    std::string color_assistant = "\033[32m";
+    std::string color_system = "\033[34m";
+    std::string color_warning = "\033[33m";
+    std::string color_error = "\033[31m";
+    std::string color_timestamp = "\033[90m";
+    std::string color_reset = "\033[0m";
+    std::map<std::string, std::string> commands;
 };
 
-// Loads config.txt into AppConfig
-// Returns true if successful, false otherwise
 bool loadConfig(const std::string& filename, AppConfig& config);
-
-// Loads commands from cmds.txt into AppConfig
-// This is called by loadConfig if cmds.txt exists
 void loadCommands(const std::string& filename, AppConfig& config);
 
 #endif

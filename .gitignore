@@ -45,3 +45,8 @@
 
 # outputted code
 code/*.txt
+
+# Config files
+config.txt
+*.zip
+ollama_cli
