@@ -93,10 +93,11 @@ int main() {
     std::string histFile = expandTilde(HISTORY_FILE);
     read_history(histFile.c_str());
 
-    std::cout << "Ollama CLI\nType HELP for a list of commands.\n";
+    std::cout << "\033[38;2;255;215;0mOllama CLI\033[0m\n\033[38;2;255;239;184mType HELP for a list of commands.\033[0m\n";
 
     while (true) {
-        char* input = readline("> ");
+        std::string prompt = "\033[38;2;255;239;184m" + config.ollama_model + "> \033[0m";
+        char* input = readline(prompt.c_str());
         if (!input) break;
 
         if (*input) {
