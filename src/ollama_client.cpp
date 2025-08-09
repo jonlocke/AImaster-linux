@@ -8,6 +8,96 @@
 #include <ctime>
 #include "serial_handler.h"
 
+// ---- One-time connectivity check on first command ----
+static size_t ocurl_discard_cb(void* contents, size_t size, size_t nmemb, void* userp) {
+    return size * nmemb;
+}
+static std::string oc_derive_tags_endpoint(const std::string& chat_url) {
+    auto pos = chat_url.find("/api/");
+    if (pos == std::string::npos) return chat_url;
+    return chat_url.substr(0, pos) + "/api/tags";
+}
+static bool oc_check_ollama_connectivity(const std::string& chat_url, long timeout_seconds, long* http_code_out=nullptr) {
+    std::string url = oc_derive_tags_endpoint(chat_url);
+    CURL* curl = curl_easy_init();
+    if (!curl) return false;
+    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
+    curl_easy_setopt(curl, CURLOPT_NOBODY, 0L);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, ocurl_discard_cb);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeout_seconds);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, timeout_seconds);
+    CURLcode res = curl_easy_perform(curl);
+    bool ok = false;
+    if (res == CURLE_OK) {
+        long code = 0;
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &code);
+        if (http_code_out) *http_code_out = code;
+        ok = (code >= 200 && code < 500);
+    }
+    curl_easy_cleanup(curl);
+    return ok;
+}
+static bool g_oc_ping_done = false;
+
+// ---- MODEL listing helpers (Ollama tags) ----
+static size_t ocurl_write_to_string(void* contents, size_t size, size_t nmemb, void* userp) {
+    size_t total = size * nmemb;
+    std::string* s = static_cast<std::string*>(userp);
+    s->append((char*)contents, total);
+    return total;
+}
+
+static std::string oderive_tags_endpoint(const std::string& chat_url) {
+    auto pos = chat_url.find("/api/");
+    if (pos == std::string::npos) return chat_url;
+    return chat_url.substr(0, pos) + "/api/tags";
+}
+
+static std::vector<std::string> fetch_ollama_models(const std::string& chat_url, std::string& error) {
+    std::vector<std::string> models;
+    std::string url = oderive_tags_endpoint(chat_url);
+
+    CURL* curl = curl_easy_init();
+    if (!curl) { error = "curl init failed"; return models; }
+
+    std::string response;
+    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, ocurl_write_to_string);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+
+    CURLcode res = curl_easy_perform(curl);
+    if (res != CURLE_OK) {
+        error = std::string("curl error: ") + curl_easy_strerror(res);
+        curl_easy_cleanup(curl);
+        return models;
+    }
+    curl_easy_cleanup(curl);
+
+    Json::CharReaderBuilder b;
+    Json::Value root;
+    std::string errs;
+    std::istringstream iss(response);
+    if (!Json::parseFromStream(b, iss, &root, &errs)) {
+        error = std::string("JSON parse error: ") + errs;
+        return models;
+    }
+    if (root.isMember("models") && root["models"].isArray()) {
+        for (const auto& m : root["models"]) {
+            if (m.isMember("name") && m["name"].isString()) {
+                models.push_back(m["name"].asString());
+            } else if (m.isMember("model") && m["model"].isString()) {
+                models.push_back(m["model"].asString());
+            }
+        }
+    } else {
+        error = "unexpected response";
+    }
+    return models;
+}
+
 struct StreamData {
     std::string collected;
     std::string raw_output;
@@ -193,7 +283,20 @@ static bool sendMessageToOllama(const std::string& query,
 }
 
 // ---- Process Command ----
-Json::Value processCommand(const std::string& command, const AppConfig& config) {
+Json::Value processCommand(const std::string& command, AppConfig& config) {
+    // One-time Ollama connectivity status on first command
+    if (!g_oc_ping_done) {
+        g_oc_ping_done = true;
+        long http_code = 0;
+        bool ok = oc_check_ollama_connectivity(config.ollama_url, config.ollama_timeout_seconds, &http_code);
+        if (!ok) {
+            std::cout << "[Warning] Could not reach Ollama at " << config.ollama_url
+                      << " within " << config.ollama_timeout_seconds << " seconds. Some commands may not work.\n";
+        } else {
+            std::cout << "[Info] Ollama reachable (HTTP " << http_code << ")\n";
+        }
+    }
+
     static std::vector<Json::Value> chatHistory;
     Json::Value result;
 
@@ -279,6 +382,13 @@ Json::Value processCommand(const std::string& command, const AppConfig& config) 
         result["baudrate"] = config.baudrate;
         result["ollama_url"] = config.ollama_url;
         result["ollama_model"] = config.ollama_model;
+        result["ollama_timeout_seconds"] = config.ollama_timeout_seconds;
+        std::cout << "\nCurrent configuration:\n";
+        std::cout << "  Serial port: " << config.serial_port << "\n";
+        std::cout << "  Baudrate: " << config.baudrate << "\n";
+        std::cout << "  Ollama URL: " << config.ollama_url << "\n";
+        std::cout << "  Model: " << config.ollama_model << "\n";
+        std::cout << "  Ollama timeout (s): " << config.ollama_timeout_seconds << "\n";
     }
 
     // ===== HELP =====
@@ -288,7 +398,8 @@ Json::Value processCommand(const std::string& command, const AppConfig& config) 
         if (!config.commands.empty()) {
             for (const auto& [cmd, desc] : config.commands) {
                 cmds[cmd] = desc;
-            }
+            
+        std::cout << "  MODEL [#|name] - List or set Ollama model\n";}
         } else {
             cmds["ASK"] = "Ask the model a question.";
             cmds["INT"] = "Enter interactive mode with the model.";
@@ -305,7 +416,78 @@ Json::Value processCommand(const std::string& command, const AppConfig& config) 
         }
     }
 
-    // ===== DIAG =====
+    
+    // ===== MODEL (list only in this layer) =====
+    
+
+    // ===== MODEL (list & set) =====
+    else if (cmd_upper.rfind("MODEL", 0) == 0) {
+        std::string arg = "";
+        if (command.size() > 5) {
+            arg = command.substr(5);
+            auto ltrim = [](std::string& s){ s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char ch){return !std::isspace(ch);})); };
+            auto rtrim = [](std::string& s){ s.erase(std::find_if(s.rbegin(), s.rend(), [](unsigned char ch){return !std::isspace(ch);}).base(), s.end()); };
+            ltrim(arg); rtrim(arg);
+        }
+
+        std::string err;
+        auto models = fetch_ollama_models(config.ollama_url, err);
+        if (!err.empty()) {
+            std::cout << "[Error] " << err << std::endl;
+            result["status"] = "error";
+            result["error"] = err;
+            return result;
+        }
+
+        if (arg.empty()) {
+            if (models.empty()) {
+                std::cout << "[Info] No models found." << std::endl;
+            } else {
+                std::cout << "\nAvailable models:\n";
+                for (size_t i = 0; i < models.size(); ++i) {
+                    bool isCurrent = (models[i] == config.ollama_model);
+                    std::cout << "  [" << (i+1) << "] " << models[i];
+                    if (isCurrent) std::cout << "  (current)";
+                    std::cout << "\n";
+                }
+                std::cout << "\nUse: MODEL <#|name> to set the model.\n";
+            }
+            result["status"] = "ok";
+            return result;
+        }
+
+        int idx = -1;
+        try { idx = std::stoi(arg); } catch (...) { idx = -1; }
+        std::string chosen;
+        if (idx >= 1 && idx <= (int)models.size()) {
+            chosen = models[idx-1];
+        } else {
+            auto eq_ci = [](const std::string& a, const std::string& b){
+                if (a.size()!=b.size()) return false;
+                for (size_t i=0;i<a.size();++i) if (std::tolower((unsigned char)a[i])!=std::tolower((unsigned char)b[i])) return false;
+                return true;
+            };
+            for (auto& m : models) if (m == arg || eq_ci(m, arg)) { chosen = m; break; }
+        }
+
+        if (chosen.empty()) {
+            std::cout << "[Warn] Model not found: " << arg << "\n";
+            result["status"] = "not_found";
+            result["arg"] = arg;
+            return result;
+        }
+
+        config.ollama_model = chosen;
+        if (saveConfig("config.txt", config)) {
+            std::cout << "[OK] Model set to: " << config.ollama_model << " (saved)\n";
+        } else {
+            std::cout << "[OK] Model set to: " << config.ollama_model << " (save failed)\n";
+        }
+        result["status"] = "ok";
+        result["model"] = config.ollama_model;
+        return result;
+    }
+// ===== DIAG =====
     else if (cmd_upper.rfind("DIAG", 0) == 0) {
         std::string arg;
         if (command.size() > 4) {

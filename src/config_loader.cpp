@@ -98,3 +98,53 @@ void loadCommands(const std::string& filename, AppConfig& config) {
         config.commands[cmd] = desc;
     }
 }
+
+
+bool saveConfig(const std::string& filename, const AppConfig& config) {
+    // Read existing lines to preserve ordering/comments
+    std::ifstream in(filename);
+    std::vector<std::string> lines;
+    if (in) {
+        std::string line;
+        while (std::getline(in, line)) lines.push_back(line);
+    } else {
+        lines = {
+            "serial_port=" + config.serial_port,
+            "baudrate=" + std::to_string(config.baudrate),
+            "ollama_url=" + config.ollama_url,
+            "ollama_model=" + config.ollama_model
+        };
+        std::ofstream out_new(filename);
+        if (!out_new) return false;
+        for (auto& l : lines) out_new << l << "\n";
+        return true;
+    }
+
+    auto set_or_add = [&](const std::string& key, const std::string& value){
+        std::string prefix = key + "=";
+        bool found = false;
+        for (auto& l : lines) {
+            std::string t = l;
+            auto notspace = [](int ch){ return !std::isspace(ch); };
+            t.erase(t.begin(), std::find_if(t.begin(), t.end(), notspace));
+            if (!t.empty() && t[0] == '#') continue;
+            if (t.rfind(prefix, 0) == 0) {
+                l = prefix + value;
+                found = true;
+                break;
+            }
+        }
+        if (!found) lines.push_back(prefix + value);
+    };
+
+    set_or_add("serial_port", config.serial_port);
+    set_or_add("baudrate", std::to_string(config.baudrate));
+    set_or_add("ollama_url", config.ollama_url);
+    set_or_add("ollama_model", config.ollama_model);
+    set_or_add("ollama_timeout_seconds", std::to_string(config.ollama_timeout_seconds));
+
+    std::ofstream out(filename, std::ios::trunc);
+    if (!out) return false;
+    for (auto& l : lines) out << l << "\n";
+    return true;
+}
