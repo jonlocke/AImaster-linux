@@ -9,6 +9,7 @@ struct AppConfig {
     int baudrate = 0;
     std::string ollama_url;
     std::string ollama_model;
+    int ollama_timeout_seconds = 2;
     std::map<std::string, std::string> commands; // command -> description
 };
 
@@ -21,3 +22,7 @@ bool loadConfig(const std::string& filename, AppConfig& config);
 void loadCommands(const std::string& filename, AppConfig& config);
 
 #endif
+
+
+// Saves the AppConfig back to the given filename. Returns true on success.
+bool saveConfig(const std::string& filename, const AppConfig& config);
