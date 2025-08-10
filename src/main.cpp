@@ -11,6 +11,8 @@
 #include "utils.h"
 #include <jsoncpp/json/json.h>
 #include <curl/curl.h>
+#include "rag_adapter.hpp"
+#include "rag_state.hpp"
 
 namespace fs = std::filesystem;
 static const char* HISTORY_FILE = "~/.ollama_cli_history";

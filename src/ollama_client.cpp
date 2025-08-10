@@ -7,6 +7,8 @@
 #include <filesystem>
 #include <ctime>
 #include "serial_handler.h"
+#include "rag_console_commands.hpp"
+
 
 // ---- One-time connectivity check on first command ----
 static size_t ocurl_discard_cb(void* contents, size_t size, size_t nmemb, void* userp) {
@@ -284,7 +286,11 @@ static bool sendMessageToOllama(const std::string& query,
 
 // ---- Process Command ----
 Json::Value processCommand(const std::string& command, AppConfig& config) {
-    // One-time Ollama connectivity status on first command
+    Json::Value ragOut;
+if (HandleRAGConsoleCommand(command, ragOut)) {
+    return ragOut; // handled RAG_INGEST / RAG_ASK / RAG_SESSION
+}
+// One-time Ollama connectivity status on first command
     if (!g_oc_ping_done) {
         g_oc_ping_done = true;
         long http_code = 0;
