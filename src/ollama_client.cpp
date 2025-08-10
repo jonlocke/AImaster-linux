@@ -8,6 +8,8 @@
 #include <ctime>
 #include "serial_handler.h"
 #include "rag_console_commands.hpp"
+#include "rag_int_bridge.hpp"
+
 
 
 // ---- One-time connectivity check on first command ----
@@ -310,33 +312,51 @@ if (HandleRAGConsoleCommand(command, ragOut)) {
     std::transform(cmd_upper.begin(), cmd_upper.end(), cmd_upper.begin(), ::toupper);
 
     // ===== ASK =====
-    if (cmd_upper == "ASK" || cmd_upper.rfind("ASK ", 0) == 0) {
-        std::string query;
-        if (cmd_upper == "ASK") {
-            std::cout << "\033[94mWhat is your Question:\033[0m";
-            std::getline(std::cin, query);
-        } else {
-            query = command.substr(4);
-        }
+if (cmd_upper == "ASK" || cmd_upper.rfind("ASK ", 0) == 0) {
+    std::string query;
+    if (cmd_upper == "ASK") {
+        std::cout << "\033[94mWhat is your Question:\033[0m";
+        std::getline(std::cin, query);
+    } else {
+        query = command.substr(4);
+    }
+
+    // Try RAG first (if active)
+    std::string rag_answer;
+    if (rag_int::TryRAGAnswer(query, rag_answer, /*k=*/5, /*threshold=*/0.2)) {
+        std::cout << rag_answer << "\n";
+        result["status"] = "success";
+    } else {
+        // Fall back to normal LLM
         sendMessageToOllama(query, chatHistory, config);
         result["status"] = "success";
     }
+}
 
     // ===== INT (interactive mode) =====
-    else if (cmd_upper == "INT") {
-        std::cout << "\033[94m[Interactive Mode]\033[0m Type your messages. Type /bye to exit.\n";
-        std::string line;
-        while (true) {
-            std::cout << "\033[38;2;228;217;111m-> ";
-            if (!std::getline(std::cin, line)) break;
-            if (line == "/bye") {
-                std::cout << "[Returning to main prompt]\033[0m\n";
-                break;
-            }
-            sendMessageToOllama(line, chatHistory, config);
+else if (cmd_upper == "INT") {
+    std::cout << "\033[94m[Interactive Mode]\033[0m Type your messages. Type /bye to exit.\n";
+    std::string line;
+    while (true) {
+        std::cout << "\033[38;2;228;217;111m-> ";
+        if (!std::getline(std::cin, line)) break;
+        if (line == "/bye") {
+            std::cout << "[Returning to main prompt]\033[0m\n";
+            break;
         }
-        result["status"] = "success";
+        //std::cerr << "[RAG_INT] trying..." << std::endl;
+        // Try RAG first (if active and enabled)
+        std::string rag_answer;
+        if (rag_int::TryRAGAnswer(line, rag_answer, /*k=*/5, /*threshold=*/0.2)) {
+            std::cout << rag_answer << "\n";
+            continue; // handled via RAG
+        }
+
+        // Fall back to normal LLM
+        sendMessageToOllama(line, chatHistory, config);
     }
+    result["status"] = "success";
+}
 
     // ===== READ =====
     else if (cmd_upper == "READ" || cmd_upper.rfind("READ_CTX:", 0) == 0) {

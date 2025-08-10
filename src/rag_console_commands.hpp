@@ -6,8 +6,8 @@
 #include <jsoncpp/json/json.h>
 #include "rag_adapter.hpp"
 #include "rag_state.hpp"
-#include "rag_int_bridge.hpp"
 
+// Header-only console handler so you don't need to add a .cpp to the build.
 inline bool HandleRAGConsoleCommand(const std::string& line, Json::Value& out) {
     std::istringstream iss(line);
     std::vector<std::string> tokens;
@@ -45,16 +45,5 @@ inline bool HandleRAGConsoleCommand(const std::string& line, Json::Value& out) {
         }
         return true;
     }
-    else if (cmd == "RAG_INT") {
-        out["ok"]=true;
-        if (tokens.size()<2 || (tokens[1]!="ON" && tokens[1]!="OFF" && tokens[1]!="STATUS")) {
-            std::cout << "Usage: RAG_INT <ON|OFF|STATUS>\n"; out["ok"]=false; out["error"]="usage"; return true;
-        }
-        if (tokens[1]=="ON")  { rag_int::SetEnabled(true);  std::cout << "RAG_INT: ON\n"; }
-        if (tokens[1]=="OFF") { rag_int::SetEnabled(false); std::cout << "RAG_INT: OFF\n"; }
-        if (tokens[1]=="STATUS") { std::cout << "RAG_INT: " << (rag_int::Enabled()? "ON":"OFF") << "\n"; out["enabled"]=rag_int::Enabled(); }
-        return true;
-    }
-
     return false;
 }

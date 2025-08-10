@@ -2,7 +2,6 @@
 #include <string>
 #include <vector>
 #include <optional>
-#include <functional>
 #include "json.hpp"
 struct Chunk{ std::string id; std::string text; std::vector<float> embedding; };
 struct SessionIndex{ std::string session_id; std::vector<Chunk> chunks; };
@@ -17,7 +16,8 @@ private:
   std::string base_dir_, ollama_url_, embed_model_, llm_model_;
   bool verbose_=true;
   void log(const std::string& msg) const;
-  static std::string uuid4(); static std::vector<std::string> findPDFs(const std::string& folder);
+  static std::string uuid4();
+  static std::vector<std::string> findPDFs(const std::string& folder);
   static std::string extract_text_poppler(const std::string& pdf_path);
   static std::string ocr_pdf_with_poppler_tesseract(const std::string& pdf_path, int dpi=200);
   static std::vector<std::string> split_chunks(const std::string& text, size_t chunk=1024,size_t overlap=100);

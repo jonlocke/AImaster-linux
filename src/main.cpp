@@ -13,6 +13,7 @@
 #include <curl/curl.h>
 #include "rag_adapter.hpp"
 #include "rag_state.hpp"
+#include "rag_int_bridge.hpp"
 
 namespace fs = std::filesystem;
 static const char* HISTORY_FILE = "~/.ollama_cli_history";
