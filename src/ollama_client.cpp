@@ -433,7 +433,10 @@ else if (cmd_upper == "INT") {
             cmds["RESET"] = "Clear chat history.";
             cmds["WHO"] = "Show current configuration.";
             cmds["HELP"] = "List available commands.";
-            cmds["DIAG"] = "Toggle diagnostic mode.";
+            cmds["MODELS"] = "List available Models.";
+            cmds["RAG_INGEST"] = "Ingest a folder into the RAG system.";
+            cmds["RAG_SHOW"] = "Show the contents of the RAG ingestion.";
+            cmds["RAG_SESSION"] = "Display the session information.";
         }
         result["commands"] = cmds;
         std::cout << "\nAvailable commands:\n";
