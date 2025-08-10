@@ -5,3 +5,11 @@ g++ -std=c++17 -Iinclude -Isrc \
 
 ./rag_demo ingest /abs/path/to/pdfs   # prints Session ID + status logs on stderr
 ./rag_demo ask <session_id> "Your question"
+
+in ./aimaster test the following commands:-
+
+RAG_INGEST /path/to/pdfs
+RAG_ASK What are these docs?
+RAG_SESSION SHOW
+RAG_SESSION SET <sid>
+RAG_SESSION CLEAR

@@ -1,3 +1,4 @@
+#include "endpoint_utils.hpp"
 #include <iostream>
 #include <string>
 #include <vector>
@@ -11,6 +12,9 @@
 #include "utils.h"
 #include <jsoncpp/json/json.h>
 #include <curl/curl.h>
+#include "rag_adapter.hpp"
+#include "rag_state.hpp"
+#include "rag_int_bridge.hpp"
 
 namespace fs = std::filesystem;
 static const char* HISTORY_FILE = "~/.ollama_cli_history";
@@ -21,14 +25,8 @@ static size_t curl_discard_cb(void* contents, size_t size, size_t nmemb, void* u
     return size * nmemb;
 }
 
-static std::string startup_derive_tags_endpoint(const std::string& chat_url) {
-    auto pos = chat_url.find("/api/");
-    if (pos == std::string::npos) return chat_url;
-    return chat_url.substr(0, pos) + "/api/tags";
-}
-
 static bool check_ollama_connectivity(const std::string& chat_url, long timeout_seconds, long* http_code_out=nullptr) {
-    std::string url = startup_derive_tags_endpoint(chat_url);
+    std::string url = EndpointResolver::deriveTagsEndpoint(chat_url);
     CURL* curl = curl_easy_init();
     if (!curl) return false;
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
@@ -58,15 +56,9 @@ static size_t curl_write_to_string(void* contents, size_t size, size_t nmemb, vo
     return total;
 }
 
-static std::string derive_tags_endpoint(const std::string& chat_url) {
-    auto pos = chat_url.find("/api/");
-    if (pos == std::string::npos) return chat_url;
-    return chat_url.substr(0, pos) + "/api/tags";
-}
-
 static std::vector<std::string> fetch_ollama_models(const std::string& chat_url, std::string& error) {
     std::vector<std::string> models;
-    std::string url = derive_tags_endpoint(chat_url);
+    std::string url = EndpointResolver::deriveTagsEndpoint(chat_url);
 
     CURL* curl = curl_easy_init();
     if (!curl) { error = "curl init failed"; return models; }

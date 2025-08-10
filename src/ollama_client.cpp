@@ -7,6 +7,10 @@
 #include <filesystem>
 #include <ctime>
 #include "serial_handler.h"
+#include "rag_console_commands.hpp"
+#include "rag_int_bridge.hpp"
+
+
 
 // ---- One-time connectivity check on first command ----
 static size_t ocurl_discard_cb(void* contents, size_t size, size_t nmemb, void* userp) {
@@ -284,7 +288,11 @@ static bool sendMessageToOllama(const std::string& query,
 
 // ---- Process Command ----
 Json::Value processCommand(const std::string& command, AppConfig& config) {
-    // One-time Ollama connectivity status on first command
+    Json::Value ragOut;
+if (HandleRAGConsoleCommand(command, ragOut)) {
+    return ragOut; // handled RAG_INGEST / RAG_ASK / RAG_SESSION
+}
+// One-time Ollama connectivity status on first command
     if (!g_oc_ping_done) {
         g_oc_ping_done = true;
         long http_code = 0;
@@ -304,33 +312,51 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
     std::transform(cmd_upper.begin(), cmd_upper.end(), cmd_upper.begin(), ::toupper);
 
     // ===== ASK =====
-    if (cmd_upper == "ASK" || cmd_upper.rfind("ASK ", 0) == 0) {
-        std::string query;
-        if (cmd_upper == "ASK") {
-            std::cout << "\033[94mWhat is your Question:\033[0m";
-            std::getline(std::cin, query);
-        } else {
-            query = command.substr(4);
-        }
+if (cmd_upper == "ASK" || cmd_upper.rfind("ASK ", 0) == 0) {
+    std::string query;
+    if (cmd_upper == "ASK") {
+        std::cout << "\033[94mWhat is your Question:\033[0m";
+        std::getline(std::cin, query);
+    } else {
+        query = command.substr(4);
+    }
+
+    // Try RAG first (if active)
+    std::string rag_answer;
+    if (rag_int::TryRAGAnswer(query, rag_answer, /*k=*/5, /*threshold=*/0.2)) {
+        std::cout << rag_answer << "\n";
+        result["status"] = "success";
+    } else {
+        // Fall back to normal LLM
         sendMessageToOllama(query, chatHistory, config);
         result["status"] = "success";
     }
+}
 
     // ===== INT (interactive mode) =====
-    else if (cmd_upper == "INT") {
-        std::cout << "\033[94m[Interactive Mode]\033[0m Type your messages. Type /bye to exit.\n";
-        std::string line;
-        while (true) {
-            std::cout << "\033[38;2;228;217;111m-> ";
-            if (!std::getline(std::cin, line)) break;
-            if (line == "/bye") {
-                std::cout << "[Returning to main prompt]\033[0m\n";
-                break;
-            }
-            sendMessageToOllama(line, chatHistory, config);
+else if (cmd_upper == "INT") {
+    std::cout << "\033[94m[Interactive Mode]\033[0m Type your messages. Type /bye to exit.\n";
+    std::string line;
+    while (true) {
+        std::cout << "\033[38;2;228;217;111m-> ";
+        if (!std::getline(std::cin, line)) break;
+        if (line == "/bye") {
+            std::cout << "[Returning to main prompt]\033[0m\n";
+            break;
         }
-        result["status"] = "success";
+        //std::cerr << "[RAG_INT] trying..." << std::endl;
+        // Try RAG first (if active and enabled)
+        std::string rag_answer;
+        if (rag_int::TryRAGAnswer(line, rag_answer, /*k=*/5, /*threshold=*/0.2)) {
+            std::cout << rag_answer << "\n";
+            continue; // handled via RAG
+        }
+
+        // Fall back to normal LLM
+        sendMessageToOllama(line, chatHistory, config);
     }
+    result["status"] = "success";
+}
 
     // ===== READ =====
     else if (cmd_upper == "READ" || cmd_upper.rfind("READ_CTX:", 0) == 0) {
@@ -407,7 +433,10 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
             cmds["RESET"] = "Clear chat history.";
             cmds["WHO"] = "Show current configuration.";
             cmds["HELP"] = "List available commands.";
-            cmds["DIAG"] = "Toggle diagnostic mode.";
+            cmds["MODELS"] = "List available Models.";
+            cmds["RAG_INGEST"] = "Ingest a folder into the RAG system.";
+            cmds["RAG_SHOW"] = "Show the contents of the RAG ingestion.";
+            cmds["RAG_SESSION"] = "Display the session information.";
         }
         result["commands"] = cmds;
         std::cout << "\nAvailable commands:\n";
