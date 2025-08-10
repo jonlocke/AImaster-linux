@@ -1,25 +1,61 @@
-CXX = g++
-CXXFLAGS = -Wall -std=c++17
-LIBS = -lserialport -ljsoncpp -lcurl -lreadline
+# ---- toolchain ----
+CXX       ?= g++
+CXXFLAGS  ?= -std=c++17 -O2 -Wall -Wextra
+CXXFLAGS  += -Iinclude -Isrc
 
-SRC = src/utils.cpp src/main.cpp src/config_loader.cpp src/serial_handler.cpp src/ollama_client.cpp
-OBJ = $(SRC:.cpp=.o)
-INCLUDE = -Iinclude
+# pkg-config cflags
+CXXFLAGS  += $(shell pkg-config --cflags poppler-cpp 2>/dev/null)
+CXXFLAGS  += $(shell pkg-config --cflags jsoncpp 2>/dev/null)
+CXXFLAGS  += $(shell pkg-config --cflags libserialport 2>/dev/null)
 
-TARGET = ollama_cli
+# ---- link libs ----
+LDLIBS    += -lcurl -ltesseract
+LDLIBS    += $(shell pkg-config --libs poppler-cpp 2>/dev/null)
+LDLIBS    += $(shell pkg-config --libs jsoncpp 2>/dev/null)
+LDLIBS    += $(shell pkg-config --libs libserialport 2>/dev/null)
 
-all: $(TARGET)
+# Fallbacks if pkg-config entries aren’t found
+LDLIBS    += -ljsoncpp -lserialport
+# readline often lacks pkg-config; add explicitly (and terminfo)
+LDLIBS    += -lreadline -lhistory -lncurses -ltinfo
 
-$(TARGET): $(OBJ)
-	$(CXX) $(CXXFLAGS) -o $@ $^ $(LIBS)
+# ---- targets ----
+AIMASTER_TARGET ?= aimaster
+RAG_DEMO_TARGET ?= rag_demo
+
+# RAG module sources
+RAG_SRC := \
+    src/rag_session.cpp \
+    src/rag_adapter.cpp
+
+# Standalone demo
+RAG_DEMO_SRC := examples/rag_demo.cpp
+
+# AImaster sources = all src/*.cpp except RAG files
+AIMASTER_SRC := $(filter-out $(RAG_SRC), $(wildcard src/*.cpp))
+
+# Objects
+RAG_OBJ        := $(RAG_SRC:.cpp=.o)
+RAG_DEMO_OBJ   := $(RAG_DEMO_SRC:.cpp=.o)
+AIMASTER_OBJ   := $(AIMASTER_SRC:.cpp=.o)
+
+.PHONY: all clean print
+all: $(AIMASTER_TARGET) $(RAG_DEMO_TARGET)
+
+$(AIMASTER_TARGET): $(AIMASTER_OBJ) $(RAG_OBJ)
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
+$(RAG_DEMO_TARGET): $(RAG_DEMO_OBJ) $(RAG_OBJ)
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
 %.o: %.cpp
-	$(CXX) $(CXXFLAGS) $(INCLUDE) -c $< -o $@
+	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(OBJ) $(TARGET)
+	rm -f $(AIMASTER_TARGET) $(RAG_DEMO_TARGET) \
+	      $(AIMASTER_OBJ) $(RAG_OBJ) $(RAG_DEMO_OBJ)
 
-run: $(TARGET)
-	./$(TARGET)
-
-.PHONY: all clean run
+print:
+	@echo "AIMASTER_SRC = $(AIMASTER_SRC)"
+	@echo "RAG_SRC      = $(RAG_SRC)"
+	@echo "LDLIBS       = $(LDLIBS)"

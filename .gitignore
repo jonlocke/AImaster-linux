@@ -1,3 +1,7 @@
+chroma_cpp
+chroma_cpp/*
+testDocs/*
+
 # Prerequisites
 *.d
 

@@ -1,0 +1,7 @@
+g++ -std=c++17 -Iinclude -Isrc \
+    src/rag_session.cpp src/rag_adapter.cpp examples/rag_demo.cpp \
+    -lcurl $(pkg-config --cflags --libs poppler-cpp) \
+    -ltesseract -o rag_demo
+
+./rag_demo ingest /abs/path/to/pdfs   # prints Session ID + status logs on stderr
+./rag_demo ask <session_id> "Your question"

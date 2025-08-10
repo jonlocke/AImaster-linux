@@ -1,6 +1,8 @@
 #include "serial_handler.h"
 #include <libserialport.h>
 #include <iostream>
+#include <cerrno>
+#include <cstring>
 
 bool serial_available = false;
 static sp_port* serial_port = nullptr;
