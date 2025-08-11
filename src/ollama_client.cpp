@@ -2,6 +2,7 @@
 #include <curl/curl.h>
 #include <algorithm>
 #include <iostream>
+#include "command_exec.h"
 #include <sstream>
 #include <fstream>
 #include <filesystem>
@@ -187,7 +188,8 @@ static size_t StreamCallback(void* contents, size_t size, size_t nmemb, void* us
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::high_resolution_clock::now() - data->start_time
         ).count();    
-        std::cerr << "\033[31m[Response: " << elapsed << " ms]\033[0m" << std::endl;
+        //std::cerr << "\033[31m[Response: " << elapsed << " ms]\033[0m" << std::endl;
+        route_output(std::string("[Response ") + std::to_string(elapsed) + "ms]", true);
         }
     data->raw_output += chunk;
 
@@ -203,7 +205,7 @@ static size_t StreamCallback(void* contents, size_t size, size_t nmemb, void* us
             parsed["message"].isMember("content")) {
 
             std::string text = parsed["message"]["content"].asString();
-            std::cout << "\033[32m" << text << "\033[0m" << std::flush;  // Green output
+            route_output(text);
 
             if (!serial_available) {
                 std::ofstream log("log.txt", std::ios::app);
@@ -255,7 +257,8 @@ static bool sendMessageToOllama(const std::string& query,
         std::cerr << "[DIAG PAYLOAD] " << jsonPayload << "\n";
     }
 
-    std::cout << "\033[38;5;208m[Thinking..]\033[0m" << std::endl;
+    //std::cout << "\033[38;5;208m[Thinking..]\033[0m" << std::endl;
+    route_output("[Thinking..]", true);
 
     curl_easy_setopt(curl, CURLOPT_URL, config.ollama_url.c_str());
     curl_easy_setopt(curl, CURLOPT_POST, 1L);
@@ -271,7 +274,7 @@ static bool sendMessageToOllama(const std::string& query,
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
 
-    std::cout << std::endl;
+    route_output("", true);
 
     if (res == CURLE_OK && !streamData.collected.empty()) {
         Json::Value reply;
@@ -298,10 +301,9 @@ if (HandleRAGConsoleCommand(command, ragOut)) {
         long http_code = 0;
         bool ok = oc_check_ollama_connectivity(config.ollama_url, config.ollama_timeout_seconds, &http_code);
         if (!ok) {
-            std::cout << "[Warning] Could not reach Ollama at " << config.ollama_url
-                      << " within " << config.ollama_timeout_seconds << " seconds. Some commands may not work.\n";
+            route_output("[Warning] Could not reach Ollama at " + config.ollama_url + " within " + std::to_string(config.ollama_timeout_seconds) + " seconds. Some commands may not work.", true);
         } else {
-            std::cout << "[Info] Ollama reachable (HTTP " << http_code << ")\n";
+            route_output("[Info] Ollama reachable (HTTP " + std::to_string(http_code) + ")", true);
         }
     }
 
@@ -315,7 +317,7 @@ if (HandleRAGConsoleCommand(command, ragOut)) {
 if (cmd_upper == "ASK" || cmd_upper.rfind("ASK ", 0) == 0) {
     std::string query;
     if (cmd_upper == "ASK") {
-        std::cout << "\033[94mWhat is your Question:\033[0m";
+        route_output("What is your Question:", false);
         std::getline(std::cin, query);
     } else {
         query = command.substr(4);
@@ -324,7 +326,7 @@ if (cmd_upper == "ASK" || cmd_upper.rfind("ASK ", 0) == 0) {
     // Try RAG first (if active)
     std::string rag_answer;
     if (rag_int::TryRAGAnswer(query, rag_answer, /*k=*/5, /*threshold=*/0.2)) {
-        std::cout << rag_answer << "\n";
+        route_output(rag_answer, true);
         result["status"] = "success";
     } else {
         // Fall back to normal LLM
@@ -335,20 +337,20 @@ if (cmd_upper == "ASK" || cmd_upper.rfind("ASK ", 0) == 0) {
 
     // ===== INT (interactive mode) =====
 else if (cmd_upper == "INT") {
-    std::cout << "\033[94m[Interactive Mode]\033[0m Type your messages. Type /bye to exit.\n";
+    route_output("[Interactive Mode] Type your messages. Type /bye to exit.", true);
     std::string line;
     while (true) {
-        std::cout << "\033[38;2;228;217;111m-> ";
+        route_output("-> ", false);
         if (!std::getline(std::cin, line)) break;
         if (line == "/bye") {
-            std::cout << "[Returning to main prompt]\033[0m\n";
+            route_output("[Returning to main prompt]", true);
             break;
         }
         //std::cerr << "[RAG_INT] trying..." << std::endl;
         // Try RAG first (if active and enabled)
         std::string rag_answer;
         if (rag_int::TryRAGAnswer(line, rag_answer, /*k=*/5, /*threshold=*/0.2)) {
-            std::cout << rag_answer << "\n";
+            route_output(rag_answer, true);
             continue; // handled via RAG
         }
 
@@ -369,19 +371,19 @@ else if (cmd_upper == "INT") {
             context = command.substr(ctxPos, filePos - ctxPos);
             filename = command.substr(filePos + 6);
         } else {
-            std::cout << "Enter context: ";
+            route_output("Enter context: ", false);
             std::getline(std::cin, context);
-            std::cout << "Enter filename: ";
+            route_output("Enter filename: ", false);
             std::getline(std::cin, filename);
         }
 
         if (!std::filesystem::exists(filename)) {
-            std::cout << "[Error] File does not exist: " << filename << std::endl;
+            route_output("[Error] File does not exist: " + filename, true);
             result["status"] = "error";
             return result;
         }
         if (std::filesystem::is_empty(filename)) {
-            std::cout << "[Error] File is empty: " << filename << std::endl;
+            route_output("[Error] File is empty: " + filename, true);
             result["status"] = "error";
             return result;
         }
@@ -409,12 +411,12 @@ else if (cmd_upper == "INT") {
         result["ollama_url"] = config.ollama_url;
         result["ollama_model"] = config.ollama_model;
         result["ollama_timeout_seconds"] = config.ollama_timeout_seconds;
-        std::cout << "\nCurrent configuration:\n";
-        std::cout << "  Serial port: " << config.serial_port << "\n";
-        std::cout << "  Baudrate: " << config.baudrate << "\n";
-        std::cout << "  Ollama URL: " << config.ollama_url << "\n";
-        std::cout << "  Model: " << config.ollama_model << "\n";
-        std::cout << "  Ollama timeout (s): " << config.ollama_timeout_seconds << "\n";
+        route_output("Current configuration:", true);
+        route_output("  Serial port: " + config.serial_port, true);
+        route_output("  Baudrate: " + std::to_string(config.baudrate), true);
+        route_output("  Ollama URL: " + config.ollama_url, true);
+        route_output("  Model: " + config.ollama_model, true);
+        route_output("  Ollama timeout (s): " + std::to_string(config.ollama_timeout_seconds), true);
     }
 
     // ===== HELP =====
@@ -439,9 +441,9 @@ else if (cmd_upper == "INT") {
             cmds["RAG_SESSION"] = "Display the session information.";
         }
         result["commands"] = cmds;
-        std::cout << "\nAvailable commands:\n";
+        route_output("Available commands:", true);
         for (auto& key : cmds.getMemberNames()) {
-            std::cout << "  " << key << " - " << cmds[key].asString() << "\n";
+            route_output("  " + key + " - " + cmds[key].asString(), true);
         }
     }
 
@@ -462,7 +464,7 @@ else if (cmd_upper == "INT") {
         std::string err;
         auto models = fetch_ollama_models(config.ollama_url, err);
         if (!err.empty()) {
-            std::cout << "[Error] " << err << std::endl;
+            route_output("[Error] " + err, true);
             result["status"] = "error";
             result["error"] = err;
             return result;
@@ -470,16 +472,16 @@ else if (cmd_upper == "INT") {
 
         if (arg.empty()) {
             if (models.empty()) {
-                std::cout << "[Info] No models found." << std::endl;
+                route_output("[Info] No models found.", true);
             } else {
-                std::cout << "\nAvailable models:\n";
+                route_output("Available models:", true);
                 for (size_t i = 0; i < models.size(); ++i) {
                     bool isCurrent = (models[i] == config.ollama_model);
-                    std::cout << "  [" << (i+1) << "] " << models[i];
-                    if (isCurrent) std::cout << "  (current)";
-                    std::cout << "\n";
+                    route_output("  [" + std::to_string(i+1) + "] " + models[i], false);
+                    if (isCurrent) route_output("  (current)", false);
+                    route_output("", true);
                 }
-                std::cout << "\nUse: MODEL <#|name> to set the model.\n";
+                route_output("Use: MODEL <#|name> to set the model.", true);
             }
             result["status"] = "ok";
             return result;
@@ -500,7 +502,7 @@ else if (cmd_upper == "INT") {
         }
 
         if (chosen.empty()) {
-            std::cout << "[Warn] Model not found: " << arg << "\n";
+            route_output("[Warn] Model not found: " + arg, true);
             result["status"] = "not_found";
             result["arg"] = arg;
             return result;
@@ -508,9 +510,9 @@ else if (cmd_upper == "INT") {
 
         config.ollama_model = chosen;
         if (saveConfig("config.txt", config)) {
-            std::cout << "[OK] Model set to: " << config.ollama_model << " (saved)\n";
+            route_output("[OK] Model set to: " + config.ollama_model + " (saved)", true);
         } else {
-            std::cout << "[OK] Model set to: " << config.ollama_model << " (save failed)\n";
+            route_output("[OK] Model set to: " + config.ollama_model + " (save failed)", true);
         }
         result["status"] = "ok";
         result["model"] = config.ollama_model;
@@ -527,7 +529,7 @@ else if (cmd_upper == "INT") {
         else if (arg == "OFF") diagMode = false;
         else if (arg.empty()) diagMode = !diagMode;
 
-        std::cout << "[Diagnostic mode " << (diagMode ? "ON" : "OFF") << "]\n";
+        route_output(std::string("[Diagnostic mode ") + (diagMode ? "ON" : "OFF") + "]", true);
         result["status"] = "success";
     }
 
@@ -540,7 +542,7 @@ else if (cmd_upper == "INT") {
 
     // ===== RESET =====
     else if (cmd_upper == "QUIT") {
-        std::cout << "[See Ya!!]\n";
+        route_output("[See Ya!!]", true);
         exit(0);
     }
     // ===== Default =====

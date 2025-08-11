@@ -2,7 +2,7 @@ CXX = g++
 CXXFLAGS = -Wall -std=c++17 -Iinclude -I/usr/include/poppler/cpp
 LDFLAGS = -lserialport -ljsoncpp -lcurl -lreadline -lpoppler-cpp -ltesseract
 
-TARGET = ollama_cli
+TARGET = AImaster
 
 OBJS = \
   src/utils.o \
@@ -13,6 +13,7 @@ OBJS = \
   src/rag_session.o \
   src/rag_adapter.o \
   src/rag_int_bridge.o \
+  src/command_exec.o \
   src/rag_state.o
 
 all: $(TARGET)

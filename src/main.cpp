@@ -8,6 +8,7 @@
 #include <readline/history.h>
 #include "config_loader.h"
 #include "serial_handler.h"
+#include "command_exec.h"
 #include "ollama_client.h"
 #include "utils.h"
 #include <jsoncpp/json/json.h>
@@ -16,8 +17,11 @@
 #include "rag_state.hpp"
 #include "rag_int_bridge.hpp"
 
+
 namespace fs = std::filesystem;
 static const char* HISTORY_FILE = "~/.ollama_cli_history";
+
+
 
 // ---- Startup connectivity check for Ollama ----
 static size_t curl_discard_cb(void* contents, size_t size, size_t nmemb, void* userp) {
@@ -181,6 +185,15 @@ int main() {
     if (!initSerial(config.serial_port, config.baudrate)) {
         std::cerr << "Warning: No serial port available. Using console mode." << std::endl;
     }
+if (serial_available) {
+    startSerialListener([&](const std::string& line) {
+        try {
+            (void)execute_command(line, config, CommandSource::SERIAL);
+        } catch (...) {
+            std::cerr << "[Warning] Exception while processing serial command\n";
+        }
+    }, /*timeout_ms=*/50);
+}
 
     // Set up tab completion
     rl_attempted_completion_function = custom_completion;
@@ -219,7 +232,7 @@ int main() {
             command = "READ_CTX:" + context + "|FILE:" + filename;
         }
 
-        Json::Value result = processCommand(command, config);
+        Json::Value result = execute_command(command, config, CommandSource::CONSOLE);
     }
 
     // Save history on exit
