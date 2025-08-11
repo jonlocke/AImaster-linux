@@ -1,4 +1,4 @@
-// serial_handler.cpp — rate-limited send + serial line listener + CRLF fix
+// serial_handler.cpp — rate-limited send + serial line listener + newline policy
 #include <iostream>
 #include <chrono>
 #include <thread>
@@ -15,10 +15,27 @@ bool serial_available = false;
 static sp_port* serial_port = nullptr;
 static std::atomic<int> serial_send_delay_ms{50};
 
+// Newline policy: 0=CRLF, 1=LFCR, 2=LF, 3=CR
+static std::atomic<int> serial_newline_policy{0};
+
 static std::thread serial_thread;
 static std::atomic<bool> serial_thread_running{false};
 static std::function<void(const std::string&)> line_callback = nullptr;
 static std::string rx_buffer;
+
+static int to_policy(const std::string& s) {
+    std::string k; k.reserve(s.size());
+    for (unsigned char c : s) k.push_back(std::toupper(c));
+    if (k == "CRLF") return 0;
+    if (k == "LFCR") return 1;
+    if (k == "LF")   return 2;
+    if (k == "CR")   return 3;
+    return 0;
+}
+
+void setSerialNewlinePolicy(const std::string& policy) {
+    serial_newline_policy.store(to_policy(policy), std::memory_order_relaxed);
+}
 
 void setSerialSendDelay(int delay_ms) {
     if (delay_ms < 0) delay_ms = 0;
@@ -55,10 +72,14 @@ bool initSerial(const std::string& port, int baudrate) {
     }
     serial_port = handle;
     serial_available = true;
-    serialSend("AImaster: Serial link active\r\n");
+
+    // Optional: announce
+    serialSend("AImaster: Serial link active\n");
+
     return true;
 }
 
+// Write one byte with a few retries. Returns true on success.
 static bool write_byte(char c) {
     int attempts = 0;
     while (attempts < 3) {
@@ -84,21 +105,38 @@ void serialSend(const std::string& data) {
     if (!serial_available || serial_port == nullptr) return;
 
     const int delay_ms = serial_send_delay_ms.load(std::memory_order_relaxed);
+    const int policy   = serial_newline_policy.load(std::memory_order_relaxed);
     const size_t n = data.size();
 
     for (size_t i = 0; i < n; ++i) {
         char c = data[i];
 
         if (c == '\n') {
-            bool had_cr_before = (i > 0 && data[i-1] == '\r');
-            if (!had_cr_before) { (void)write_byte('\r'); }
-            (void)write_byte('\n');
+            // Expand LF according to policy
+            switch (policy) {
+                case 0: // CRLF
+                    if (!(i > 0 && data[i-1] == '\r')) (void)write_byte('\r');
+                    (void)write_byte('\n');
+                    break;
+                case 1: // LFCR
+                    (void)write_byte('\n');
+                    (void)write_byte('\r');
+                    break;
+                case 2: // LF
+                    (void)write_byte('\n');
+                    break;
+                case 3: // CR
+                    (void)write_byte('\r');
+                    break;
+            }
             if (delay_ms > 0) std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
             continue;
         }
 
+        // Normal byte
         (void)write_byte(c);
 
+        // If user provided CRLF literally, avoid splitting delay between them
         if (c == '\r' && (i + 1 < n) && data[i+1] == '\n') {
             continue;
         }
