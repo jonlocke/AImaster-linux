@@ -1,9 +1,0 @@
-#!/bin/bash
-sudo apt-get -y update; apt-get install -y g++ libserialport-dev make libjsoncpp-dev
-sudo apt-get -y install libcurl4-openssl-dev
-snap install ollama
-snap start ollama
-ollama pull gemma3:4b
-
-
-

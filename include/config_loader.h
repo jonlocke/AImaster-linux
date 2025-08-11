@@ -5,24 +5,29 @@
 #include <map>
 
 struct AppConfig {
-    std::string serial_port;
-    int baudrate = 0;
-    std::string ollama_url;
-    std::string ollama_model;
-    int ollama_timeout_seconds = 2;
-    std::map<std::string, std::string> commands; // command -> description
+    // Serial
+    std::string serial_port;        // e.g. /dev/ttyUSB0 or COM3
+    int baudrate = 2400;
+    int serial_delay_ms = 50;       // per-char delay for serialSend()
+
+    // Ollama
+    std::string ollama_url = "http://localhost:11434";
+    std::string ollama_model = "gemma3:4b";
+    long ollama_timeout_seconds = 5; // default network timeout
+
+    // Commands (optional; populated from CSV if provided)
+    std::map<std::string, std::string> commands; // cmd -> description
+    std::string commands_csv_path; // where we loaded from (if any)
 };
 
-// Loads config.txt into AppConfig
-// Returns true if successful, false otherwise
-bool loadConfig(const std::string& filename, AppConfig& config);
+// Load configuration from key=value "config.txt".
+// Recognized keys (case-insensitive):
+//   serial_port, baudrate, serial_delay_ms,
+//   ollama_url, ollama_model, ollama_timeout_seconds,
+//   commands_csv (optional: path to CSV "cmd,description")
+bool loadConfig(const std::string& path, AppConfig& out);
 
-// Loads commands from cmds.txt into AppConfig
-// This is called by loadConfig if cmds.txt exists
-void loadCommands(const std::string& filename, AppConfig& config);
+// Save a minimal config back to disk in key=value format.
+bool saveConfig(const std::string& path, const AppConfig& cfg);
 
-#endif
-
-
-// Saves the AppConfig back to the given filename. Returns true on success.
-bool saveConfig(const std::string& filename, const AppConfig& config);
+#endif // CONFIG_LOADER_H

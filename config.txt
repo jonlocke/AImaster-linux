@@ -1,8 +1,9 @@
-serial_port=/tmp/ttyA
+serial_port=/dev/ttyUSB0
 baudrate=2400
-
+serial_delay_ms=75
 ollama_url=http://localhost:11434/api/chat
 ollama_model=gemma3:4b-it-qat
 #ollama_model=gemma3:4bgemma3:4b-it-qat
-
 ollama_timeout_seconds=2
+commands_csv=cmds.csv   # optional
+
