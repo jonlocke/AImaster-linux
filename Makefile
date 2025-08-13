@@ -14,7 +14,7 @@ OBJS = \
   src/rag_adapter.o \
   src/rag_int_bridge.o \
   src/command_exec.o \
-  src/rag_state.o
+  src/rag_state.o 
 
 all: $(TARGET)
 

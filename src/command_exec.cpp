@@ -8,7 +8,9 @@
 
 Json::Value processCommand(const std::string& line, AppConfig& config);
 
-static thread_local CommandSource tls_source = CommandSource::CONSOLE;
+//static thread_local CommandSource tls_source = CommandSource::CONSOLE;
+thread_local CommandSource tls_source = CommandSource::CONSOLE;
+
 
 struct ScopedSource {
     CommandSource prev;
@@ -139,10 +141,19 @@ static void append_wrapped(const std::string& s, bool force_newline, std::string
         tl_line_started = false;
     }
 }
+// Setter used by sendMessageToOllama to keep routing aligned with caller
+void setCurrentCommandSource(CommandSource s) {
+    // tls_source is already defined in this translation unit
+    tls_source = s;
+}
 
 void route_output(const std::string& s, bool newline) {
     const bool use_serial = (tls_source == CommandSource::SERIAL) ||
                             g_serial_override.load(std::memory_order_relaxed);
+::fprintf(stderr, "[DIAG] route_output to=%c src=%d msg=%.40s\n",
+          (use_serial && serial_available) ? 's' : 'c',
+          (int)getCurrentCommandSource(),
+          s.c_str());
 
     if (use_serial && serial_available) {
         std::string cleaned = sanitize_for_serial(s);

@@ -17,6 +17,8 @@
 #include "rag_state.hpp"
 #include "rag_int_bridge.hpp"
 #include "io_sink.h"
+#include "route_context.h"
+
 
 
 
@@ -195,6 +197,10 @@ setSerialSendDelay(config.serial_delay_ms);      // <- make sure this line exist
 if (serial_available) {
 startSerialListener([&](const std::string& line) {
     try {
+                setCurrentCommandSource(CommandSource::SERIAL);  // <-- add this line
+                ::fprintf(stderr, "[DIAG] serial listener: setting src=SERIAL\n");
+
+
         if (SerialINT_IsActive()) {
             SerialINT_HandleLine(line, config);
         

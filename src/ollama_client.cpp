@@ -14,6 +14,8 @@
 #include <iostream>
 #include <sstream>
 #include <vector>
+#include "route_context.h"
+
 
 using std::string;
 
@@ -240,6 +242,8 @@ static void setCurlStreamingOptions(CURL* curl, struct curl_slist*& headers) {
 static bool sendMessageToOllama(const std::string& query,
                                 std::vector<Json::Value>& chatHistory,
                                 const AppConfig& config) {
+   ::fprintf(stderr, "[DIAG] sendMessage caller src=%d\n", (int)getCurrentCommandSource());
+ // Add user message to history
     Json::Value msg;
     msg["role"] = "user";
     msg["content"] = query;
@@ -248,6 +252,7 @@ static bool sendMessageToOllama(const std::string& query,
     CURL* curl = curl_easy_init();
     if (!curl) return false;
 
+    // Build streaming payload
     StreamData streamData;
     Json::Value payload;
     payload["model"] = config.ollama_model;
@@ -263,35 +268,48 @@ static bool sendMessageToOllama(const std::string& query,
         std::cerr << "[DIAG PAYLOAD] " << jsonPayload << "\n";
     }
 
+    // --- Route replies correctly during this call ---
+    // If the caller is SERIAL (INT), force serial while streaming; otherwise leave as-is.
+const CommandSource prev = getCurrentCommandSource();
+setCurrentCommandSource(prev);   // assert caller’s route for this thread
     route_output("[Thinking..]", true);
 
-    curl_easy_setopt(curl, CURLOPT_URL, config.ollama_url.c_str());
-    curl_easy_setopt(curl, CURLOPT_POST, 1L);
+    // cURL setup
+    curl_easy_setopt(curl, CURLOPT_URL,        config.ollama_url.c_str());
+    curl_easy_setopt(curl, CURLOPT_POST,       1L);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, jsonPayload.c_str());
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &streamData);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA,  &streamData);
 
     struct curl_slist* headers = NULL;
     streamData.start_time = std::chrono::high_resolution_clock::now();
     streamData.first_chunk_received = false;
     setCurlStreamingOptions(curl, headers);
 
+    // Perform request (your write/stream callback should call route_output)
     CURLcode res = curl_easy_perform(curl);
+
+    // Cleanup curl
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
 
-    route_output("", true); // flush line
+    // Finish line after streaming tokens
+    route_output("", true);
+setCurrentCommandSource(prev);
 
-    if (res == CURLE_OK && !streamData.collected.empty()) {
+    // Determine success and update chat history
+    const bool ok = (res == CURLE_OK && !streamData.collected.empty());
+    if (ok) {
         Json::Value reply;
         reply["role"] = "assistant";
         reply["content"] = streamData.collected;
         chatHistory.push_back(reply);
-
         saveCodeBlocks(streamData.collected);
-        return true;
     }
-    return false;
+
+    return ok;
 }
+
+
 
 // ================= Serial INT state =================
 static std::atomic<bool> g_serial_int_active{false};
@@ -303,6 +321,7 @@ bool SerialINT_IsActive() {
 
 void SerialINT_Start(AppConfig& config) {
     g_serial_int_active.store(true, std::memory_order_relaxed);
+    fprintf(stderr, "[DIAG] INT called from source=%d\n", (int)getCurrentCommandSource());
     route_output("[Interactive Mode] Type your messages. Type /bye to exit.", true);
     route_output(modelPrompt(config, "-> "), false);
 }
