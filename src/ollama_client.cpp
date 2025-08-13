@@ -1,17 +1,32 @@
 #include "ollama_client.h"
-#include <curl/curl.h>
-#include <algorithm>
-#include <iostream>
-#include "command_exec.h"
-#include <sstream>
-#include <fstream>
-#include <filesystem>
-#include <ctime>
-#include "serial_handler.h"
+#include "config_loader.h"        // AppConfig definition + saveConfig/loadConfig
+#include "command_exec.h"         // route_output, ScopedSource, CommandSource
+#include "serial_handler.h"       // serialSend, serial_available
 #include "rag_console_commands.hpp"
 #include "rag_int_bridge.hpp"
 
+#include <curl/curl.h>
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <sstream>
+#include <vector>
 
+using std::string;
+
+static std::string toupper_copy(std::string s){
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c){ return std::toupper(c); });
+    return s;
+}
+
+// ---------- Prompt helper ----------
+std::string modelPrompt(const AppConfig& cfg, const char* suffix) {
+    const std::string name = cfg.ollama_model.empty() ? "model" : cfg.ollama_model;
+    return name + suffix;
+}
 
 // ---- One-time connectivity check on first command ----
 static size_t ocurl_discard_cb(void* contents, size_t size, size_t nmemb, void* userp) {
@@ -52,13 +67,11 @@ static size_t ocurl_write_to_string(void* contents, size_t size, size_t nmemb, v
     s->append((char*)contents, total);
     return total;
 }
-
 static std::string oderive_tags_endpoint(const std::string& chat_url) {
     auto pos = chat_url.find("/api/");
     if (pos == std::string::npos) return chat_url;
     return chat_url.substr(0, pos) + "/api/tags";
 }
-
 static std::vector<std::string> fetch_ollama_models(const std::string& chat_url, std::string& error) {
     std::vector<std::string> models;
     std::string url = oderive_tags_endpoint(chat_url);
@@ -103,21 +116,19 @@ static std::vector<std::string> fetch_ollama_models(const std::string& chat_url,
     return models;
 }
 
+// ---- Streaming support ----
 struct StreamData {
     std::string collected;
     std::string raw_output;
     std::chrono::high_resolution_clock::time_point start_time;
     bool first_chunk_received = false;
 };
-
-
 static bool diagMode = false; // Diagnostic dump mode
 
-// ---- Save Code Blocks ----
 namespace {
     void saveCodeBlocks(const std::string& text) {
         namespace fs = std::filesystem;
-        std::string delimiter = "```";
+        const std::string delimiter = "```";
         size_t pos = 0;
         int blockCount = 0;
 
@@ -127,6 +138,7 @@ namespace {
             if (end == std::string::npos) break;
 
             std::string codeBlock = text.substr(start, end - start);
+            // Trim
             codeBlock.erase(0, codeBlock.find_first_not_of(" \t\n\r"));
             codeBlock.erase(codeBlock.find_last_not_of(" \t\n\r") + 1);
 
@@ -161,7 +173,7 @@ namespace {
             if (outFile.is_open()) {
                 outFile << codeBlock;
                 outFile.close();
-                std::cout << "[Saved code block to " << oss.str() << "]\n";
+                route_output(std::string("[Saved code block to ") + oss.str() + "]", true);
             }
 
             blockCount++;
@@ -170,7 +182,6 @@ namespace {
     }
 }
 
-// ---- Streaming Callback ----
 static size_t StreamCallback(void* contents, size_t size, size_t nmemb, void* userp) {
     size_t totalSize = size * nmemb;
     std::string chunk((char*)contents, totalSize);
@@ -180,17 +191,13 @@ static size_t StreamCallback(void* contents, size_t size, size_t nmemb, void* us
     }
 
     StreamData* data = (StreamData*)userp;
-    if (diagMode) {
-        std::cerr << "[DEBUG] Got chunk of size " << totalSize << " bytes" << std::endl;
-    }
     if (!data->first_chunk_received) {
         data->first_chunk_received = true;
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::high_resolution_clock::now() - data->start_time
-        ).count();    
-        //std::cerr << "\033[31m[Response: " << elapsed << " ms]\033[0m" << std::endl;
+        ).count();
         route_output(std::string("[Response ") + std::to_string(elapsed) + "ms]", true);
-        }
+    }
     data->raw_output += chunk;
 
     Json::CharReaderBuilder reader;
@@ -220,7 +227,6 @@ static size_t StreamCallback(void* contents, size_t size, size_t nmemb, void* us
     return totalSize;
 }
 
-// ---- Helper for common curl options ----
 static void setCurlStreamingOptions(CURL* curl, struct curl_slist*& headers) {
     curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
     curl_easy_setopt(curl, CURLOPT_TCP_NODELAY, 1L);
@@ -257,7 +263,6 @@ static bool sendMessageToOllama(const std::string& query,
         std::cerr << "[DIAG PAYLOAD] " << jsonPayload << "\n";
     }
 
-    //std::cout << "\033[38;5;208m[Thinking..]\033[0m" << std::endl;
     route_output("[Thinking..]", true);
 
     curl_easy_setopt(curl, CURLOPT_URL, config.ollama_url.c_str());
@@ -274,7 +279,7 @@ static bool sendMessageToOllama(const std::string& query,
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
 
-    route_output("", true);
+    route_output("", true); // flush line
 
     if (res == CURLE_OK && !streamData.collected.empty()) {
         Json::Value reply;
@@ -285,81 +290,112 @@ static bool sendMessageToOllama(const std::string& query,
         saveCodeBlocks(streamData.collected);
         return true;
     }
-
     return false;
 }
 
-// ---- Process Command ----
+// ================= Serial INT state =================
+static std::atomic<bool> g_serial_int_active{false};
+static std::vector<Json::Value> g_chatHistory;
+
+bool SerialINT_IsActive() {
+    return g_serial_int_active.load(std::memory_order_relaxed);
+}
+
+void SerialINT_Start(AppConfig& config) {
+    g_serial_int_active.store(true, std::memory_order_relaxed);
+    route_output("[Interactive Mode] Type your messages. Type /bye to exit.", true);
+    route_output(modelPrompt(config, "-> "), false);
+}
+
+void SerialINT_HandleLine(const std::string& line, AppConfig& config) {
+    if (line == "/bye") {
+        g_serial_int_active.store(false, std::memory_order_relaxed);
+        route_output("[Returning to main prompt]", true);
+        route_output(modelPrompt(config, "> "), false);
+        return;
+    }
+    // Try RAG first (if active and enabled)
+    std::string rag_answer;
+    if (rag_int::TryRAGAnswer(line, rag_answer, /*k=*/5, /*threshold=*/0.2)) {
+        route_output(rag_answer, true);
+        route_output(modelPrompt(config, "-> "), false);
+        return;
+    }
+    // Fall back to normal LLM
+    sendMessageToOllama(line, g_chatHistory, config);
+    route_output(modelPrompt(config, "-> "), false);
+}
+
+// ---- helpers ----
+static std::vector<std::string> split_ws(const std::string& s){
+    std::istringstream iss(s);
+    std::vector<std::string> out; std::string tok;
+    while (iss >> tok) out.push_back(tok);
+    return out;
+}
+static std::string ltrim(std::string s){
+    s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char ch){return !std::isspace(ch);}));
+    return s;
+}
+static std::string rtrim(std::string s){
+    s.erase(std::find_if(s.rbegin(), s.rend(), [](unsigned char ch){return !std::isspace(ch);} ).base(), s.end());
+    return s;
+}
+static std::string trim(std::string s){ return rtrim(ltrim(s)); }
+
+// ================= Dispatcher =================
 Json::Value processCommand(const std::string& command, AppConfig& config) {
     Json::Value ragOut;
-if (HandleRAGConsoleCommand(command, ragOut)) {
-    return ragOut; // handled RAG_INGEST / RAG_ASK / RAG_SESSION
-}
-// One-time Ollama connectivity status on first command
+    if (HandleRAGConsoleCommand(command, ragOut)) {
+        return ragOut; // handled RAG_INGEST / RAG_ASK / RAG_SESSION / etc
+    }
+
+    // One-time Ollama connectivity status on first command
     if (!g_oc_ping_done) {
         g_oc_ping_done = true;
         long http_code = 0;
         bool ok = oc_check_ollama_connectivity(config.ollama_url, config.ollama_timeout_seconds, &http_code);
         if (!ok) {
-            route_output("[Warning] Could not reach Ollama at " + config.ollama_url + " within " + std::to_string(config.ollama_timeout_seconds) + " seconds. Some commands may not work.", true);
+            route_output(std::string("[Warning] Could not reach Ollama at ") + config.ollama_url +
+                         " within " + std::to_string(config.ollama_timeout_seconds) + " seconds. Some commands may not work.", true);
         } else {
-            route_output("[Info] Ollama reachable (HTTP " + std::to_string(http_code) + ")", true);
+            route_output(std::string("[Info] Ollama reachable (HTTP ") + std::to_string(http_code) + ")", true);
         }
     }
 
     static std::vector<Json::Value> chatHistory;
     Json::Value result;
 
-    std::string cmd_upper = command;
-    std::transform(cmd_upper.begin(), cmd_upper.end(), cmd_upper.begin(), ::toupper);
+    const std::string cmd_upper = toupper_copy(command);
 
     // ===== ASK =====
-if (cmd_upper == "ASK" || cmd_upper.rfind("ASK ", 0) == 0) {
-    std::string query;
-    if (cmd_upper == "ASK") {
-        route_output("What is your Question:", false);
-        std::getline(std::cin, query);
-    } else {
-        query = command.substr(4);
-    }
-
-    // Try RAG first (if active)
-    std::string rag_answer;
-    if (rag_int::TryRAGAnswer(query, rag_answer, /*k=*/5, /*threshold=*/0.2)) {
-        route_output(rag_answer, true);
-        result["status"] = "success";
-    } else {
-        // Fall back to normal LLM
-        sendMessageToOllama(query, chatHistory, config);
-        result["status"] = "success";
-    }
-}
-
-    // ===== INT (interactive mode) =====
-else if (cmd_upper == "INT") {
-    route_output("[Interactive Mode] Type your messages. Type /bye to exit.", true);
-    std::string line;
-    while (true) {
-        route_output("-> ", false);
-        if (!std::getline(std::cin, line)) break;
-        if (line == "/bye") {
-            route_output("[Returning to main prompt]", true);
-            break;
+    if (cmd_upper == "ASK" || cmd_upper.rfind("ASK ", 0) == 0) {
+        std::string query;
+        if (cmd_upper == "ASK") {
+            route_output("What is your Question:", false);
+            std::getline(std::cin, query);
+        } else {
+            query = command.substr(4);
         }
-        //std::cerr << "[RAG_INT] trying..." << std::endl;
-        // Try RAG first (if active and enabled)
+
+        // Try RAG first (if active)
         std::string rag_answer;
-        if (rag_int::TryRAGAnswer(line, rag_answer, /*k=*/5, /*threshold=*/0.2)) {
+        if (rag_int::TryRAGAnswer(query, rag_answer, /*k=*/5, /*threshold=*/0.2)) {
             route_output(rag_answer, true);
-            continue; // handled via RAG
+            result["status"] = "success";
+        } else {
+            // Fall back to normal LLM
+            sendMessageToOllama(query, chatHistory, config);
+            result["status"] = "success";
         }
-
-        // Fall back to normal LLM
-        sendMessageToOllama(line, chatHistory, config);
+        return result;
     }
-    result["status"] = "success";
-}
-
+    // ===== INT (interactive mode) =====
+    else if (cmd_upper == "INT") {
+        SerialINT_Start(config);
+        result["status"] = "success";
+        return result;
+    }
     // ===== READ =====
     else if (cmd_upper == "READ" || cmd_upper.rfind("READ_CTX:", 0) == 0) {
         std::string context;
@@ -378,12 +414,12 @@ else if (cmd_upper == "INT") {
         }
 
         if (!std::filesystem::exists(filename)) {
-            route_output("[Error] File does not exist: " + filename, true);
+            route_output(std::string("[Error] File does not exist: ") + filename, true);
             result["status"] = "error";
             return result;
         }
         if (std::filesystem::is_empty(filename)) {
-            route_output("[Error] File is empty: " + filename, true);
+            route_output(std::string("[Error] File is empty: ") + filename, true);
             result["status"] = "error";
             return result;
         }
@@ -401,8 +437,8 @@ else if (cmd_upper == "INT") {
 
         sendMessageToOllama(fullMessage, chatHistory, config);
         result["status"] = "success";
+        return result;
     }
-
     // ===== WHO =====
     else if (cmd_upper == "WHO") {
         result["status"] = "success";
@@ -412,22 +448,43 @@ else if (cmd_upper == "INT") {
         result["ollama_model"] = config.ollama_model;
         result["ollama_timeout_seconds"] = config.ollama_timeout_seconds;
         route_output("Current configuration:", true);
-        route_output("  Serial port: " + config.serial_port, true);
-        route_output("  Baudrate: " + std::to_string(config.baudrate), true);
-        route_output("  Ollama URL: " + config.ollama_url, true);
-        route_output("  Model: " + config.ollama_model, true);
-        route_output("  Ollama timeout (s): " + std::to_string(config.ollama_timeout_seconds), true);
+        route_output(std::string("  Serial port: ") + config.serial_port, true);
+        route_output(std::string("  Baudrate: ") + std::to_string(config.baudrate), true);
+        route_output(std::string("  Ollama URL: ") + config.ollama_url, true);
+        route_output(std::string("  Model: ") + config.ollama_model, true);
+        route_output(std::string("  Ollama timeout (s): ") + std::to_string(config.ollama_timeout_seconds), true);
+        return result;
     }
-
+    // ===== DELAY =====
+    else if (cmd_upper.rfind("DELAY", 0) == 0) {
+        auto tokens = split_ws(command);
+        if (tokens.size() < 2) {
+            route_output("Usage: DELAY <ms>", true);
+            return Json::Value();
+        }
+        int ms = -1;
+        try { ms = std::stoi(tokens[1]); } catch (...) { ms = -1; }
+        if (ms < 0) {
+            route_output("[Error] ms must be >= 0", true);
+            return Json::Value();
+        }
+        setSerialSendDelay(ms);
+        config.serial_delay_ms = ms;
+        if (saveConfig("config.txt", config)) {
+            route_output(std::string("[OK] serial_delay_ms=") + std::to_string(ms) + " (saved)", true);
+        } else {
+            route_output(std::string("[OK] serial_delay_ms=") + std::to_string(ms) + " (save failed)", true);
+        }
+        return Json::Value();
+    }
     // ===== HELP =====
     else if (cmd_upper == "HELP") {
         result["status"] = "success";
         Json::Value cmds(Json::objectValue);
         if (!config.commands.empty()) {
-            for (const auto& [cmd, desc] : config.commands) {
-                cmds[cmd] = desc;
-            
-        std::cout << "  MODEL [#|name] - List or set Ollama model\n";}
+            for (const auto& kv : config.commands) {
+                cmds[kv.first] = kv.second;
+            }
         } else {
             cmds["ASK"] = "Ask the model a question.";
             cmds["INT"] = "Enter interactive mode with the model.";
@@ -435,7 +492,7 @@ else if (cmd_upper == "INT") {
             cmds["RESET"] = "Clear chat history.";
             cmds["WHO"] = "Show current configuration.";
             cmds["HELP"] = "List available commands.";
-            cmds["MODELS"] = "List available Models.";
+            cmds["MODEL"] = "List or set Ollama model.";
             cmds["RAG_INGEST"] = "Ingest a folder into the RAG system.";
             cmds["RAG_SHOW"] = "Show the contents of the RAG ingestion.";
             cmds["RAG_SESSION"] = "Display the session information.";
@@ -445,26 +502,19 @@ else if (cmd_upper == "INT") {
         for (auto& key : cmds.getMemberNames()) {
             route_output("  " + key + " - " + cmds[key].asString(), true);
         }
+        return result;
     }
-
-    
-    // ===== MODEL (list only in this layer) =====
-    
-
     // ===== MODEL (list & set) =====
     else if (cmd_upper.rfind("MODEL", 0) == 0) {
         std::string arg = "";
         if (command.size() > 5) {
-            arg = command.substr(5);
-            auto ltrim = [](std::string& s){ s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char ch){return !std::isspace(ch);})); };
-            auto rtrim = [](std::string& s){ s.erase(std::find_if(s.rbegin(), s.rend(), [](unsigned char ch){return !std::isspace(ch);}).base(), s.end()); };
-            ltrim(arg); rtrim(arg);
+            arg = trim(command.substr(5));
         }
 
         std::string err;
         auto models = fetch_ollama_models(config.ollama_url, err);
         if (!err.empty()) {
-            route_output("[Error] " + err, true);
+            route_output(std::string("[Error] ") + err, true);
             result["status"] = "error";
             result["error"] = err;
             return result;
@@ -477,9 +527,9 @@ else if (cmd_upper == "INT") {
                 route_output("Available models:", true);
                 for (size_t i = 0; i < models.size(); ++i) {
                     bool isCurrent = (models[i] == config.ollama_model);
-                    route_output("  [" + std::to_string(i+1) + "] " + models[i], false);
-                    if (isCurrent) route_output("  (current)", false);
-                    route_output("", true);
+                    std::string line = "  [" + std::to_string(i+1) + "] " + models[i];
+                    if (isCurrent) line += "  (current)";
+                    route_output(line, true);
                 }
                 route_output("Use: MODEL <#|name> to set the model.", true);
             }
@@ -502,7 +552,7 @@ else if (cmd_upper == "INT") {
         }
 
         if (chosen.empty()) {
-            route_output("[Warn] Model not found: " + arg, true);
+            route_output(std::string("[Warn] Model not found: ") + arg, true);
             result["status"] = "not_found";
             result["arg"] = arg;
             return result;
@@ -510,15 +560,15 @@ else if (cmd_upper == "INT") {
 
         config.ollama_model = chosen;
         if (saveConfig("config.txt", config)) {
-            route_output("[OK] Model set to: " + config.ollama_model + " (saved)", true);
+            route_output(std::string("[OK] Model set to: ") + config.ollama_model + " (saved)", true);
         } else {
-            route_output("[OK] Model set to: " + config.ollama_model + " (save failed)", true);
+            route_output(std::string("[OK] Model set to: ") + config.ollama_model + " (save failed)", true);
         }
         result["status"] = "ok";
         result["model"] = config.ollama_model;
         return result;
     }
-// ===== DIAG =====
+    // ===== DIAG =====
     else if (cmd_upper.rfind("DIAG", 0) == 0) {
         std::string arg;
         if (command.size() > 4) {
@@ -531,25 +581,24 @@ else if (cmd_upper == "INT") {
 
         route_output(std::string("[Diagnostic mode ") + (diagMode ? "ON" : "OFF") + "]", true);
         result["status"] = "success";
+        return result;
     }
-
     // ===== RESET =====
     else if (cmd_upper == "RESET") {
         chatHistory.clear();
         result["status"] = "success";
         result["message"] = "Chat history cleared.";
+        return result;
     }
-
-    // ===== RESET =====
+    // ===== QUIT =====
     else if (cmd_upper == "QUIT") {
         route_output("[See Ya!!]", true);
-        exit(0);
+        std::exit(0);
     }
+
     // ===== Default =====
-    else {
-        result["status"] = "success";
-        result["message"] = "Command: " + command;
-    }
+    result["status"] = "success";
+    result["message"] = "Command: " + command;
 
     if (!serial_available) {
         std::ofstream log("log.txt", std::ios::app);
@@ -559,6 +608,5 @@ else if (cmd_upper == "INT") {
             log << Json::writeString(writer, result) << std::endl;
         }
     }
-
     return result;
 }

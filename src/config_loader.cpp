@@ -65,6 +65,14 @@ bool loadConfig(const std::string& path, AppConfig& out) {
         else if (key == "ollama_model") out.ollama_model = val;
         else if (key == "ollama_timeout_seconds") { long v; if (parse_long(val, v) && v>=0) out.ollama_timeout_seconds = v; }
         else if (key == "commands_csv") { out.commands_csv_path = val; load_commands_csv(val, out.commands); }
+        else if (key == "serial_wrap_cols") {
+    int v; if (parse_int(val, v)) {
+        if (v < 10) v = 10;
+        if (v > 240) v = 240;
+        out.serial_wrap_cols = v;
+    }
+}
+
         else { /* ignore unknown */ }
     }
 
@@ -83,6 +91,7 @@ bool saveConfig(const std::string& path, const AppConfig& cfg) {
     out << "ollama_url=" << cfg.ollama_url << "\n";
     out << "ollama_model=" << cfg.ollama_model << "\n";
     out << "ollama_timeout_seconds=" << cfg.ollama_timeout_seconds << "\n";
+    out << "serial_wrap_cols=" << cfg.serial_wrap_cols << "\n";
     if (!cfg.commands_csv_path.empty()) out << "commands_csv=" << cfg.commands_csv_path << "\n";
     else out << "# commands_csv=cmds.csv\n";
     return true;

@@ -8,6 +8,8 @@ struct AppConfig {
     // Serial
     std::string serial_port;
     int baudrate = 2400;
+    int serial_wrap_cols = 80; // wrap width for serial routing
+
     int serial_delay_ms = 50;
     std::string serial_newline = "CRLF"; // NEW: CRLF (default), LFCR, LF, CR
 

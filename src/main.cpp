@@ -16,6 +16,9 @@
 #include "rag_adapter.hpp"
 #include "rag_state.hpp"
 #include "rag_int_bridge.hpp"
+#include "io_sink.h"
+
+
 
 
 namespace fs = std::filesystem;
@@ -171,7 +174,9 @@ int main() {
         std::cerr << "Error loading config.txt" << std::endl;
         return 1;
     }
-    // Ping Ollama server with 2s timeout (non-fatal)
+    // After loadConfig("config.txt", config);
+setSerialWrapColumns(config.serial_wrap_cols);
+// Ping Ollama server with 2s timeout (non-fatal)
     {
         long http_code = 0;
         bool ok = check_ollama_connectivity(config.ollama_url, 2, &http_code);
@@ -188,13 +193,20 @@ setSerialSendDelay(config.serial_delay_ms);      // <- make sure this line exist
         std::cerr << "Warning: No serial port available. Using console mode." << std::endl;
     }
 if (serial_available) {
-    startSerialListener([&](const std::string& line) {
-        try {
+startSerialListener([&](const std::string& line) {
+    try {
+        if (SerialINT_IsActive()) {
+            SerialINT_HandleLine(line, config);
+        
+serialSend(modelPrompt(config, "> "));
+} else {
             (void)execute_command(line, config, CommandSource::SERIAL);
-        } catch (...) {
-            std::cerr << "[Warning] Exception while processing serial command\n";
         }
-    }, /*timeout_ms=*/50);
+    } catch (...) {
+        std::cerr << "[Warning] exception in serial command handler\n";
+    }
+}, 50);
+
 }
 
     // Set up tab completion
@@ -242,3 +254,4 @@ if (serial_available) {
 
     return 0;
 }
+

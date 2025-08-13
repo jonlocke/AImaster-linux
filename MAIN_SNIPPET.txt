@@ -1,0 +1,22 @@
+// --- Add near top of main.cpp (after includes) ---
+static std::string modelPrompt(const AppConfig& cfg, const char* suffix) {
+    const std::string name = cfg.ollama_model.empty() ? "model" : cfg.ollama_model;
+    return name + suffix;
+}
+
+// --- In your serial listener ---
+startSerialListener([&](const std::string& line) {
+    try {
+        if (SerialINT_IsActive()) {
+            SerialINT_HandleLine(line, config);
+        } else {
+            (void)execute_command(line, config, CommandSource::SERIAL);
+            serialSend(modelPrompt(config, "> "));   // prompt for next command
+        }
+    } catch (...) {
+        std::cerr << "[Warning] exception in serial command handler\n";
+    }
+}, 50);
+
+// --- After initSerial(...) succeeds, show an initial prompt on UART ---
+serialSend(modelPrompt(config, "> "));

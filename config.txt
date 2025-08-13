@@ -1,9 +1,0 @@
-# AImaster configuration (key=value)
-serial_port=/dev/ttyUSB0
-baudrate=2400
-serial_delay_ms=50
-serial_newline=LFCR
-ollama_url=http://localhost:11434/api/chat
-ollama_model=llama3:latest
-ollama_timeout_seconds=2
-commands_csv=cmds.csv
