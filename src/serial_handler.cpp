@@ -10,6 +10,7 @@
 
 #include <libserialport.h>
 #include "serial_handler.h"
+#include "io_sink.h"
 
 bool serial_available = false;
 static sp_port* serial_port = nullptr;
@@ -72,6 +73,8 @@ bool initSerial(const std::string& port, int baudrate) {
     }
     serial_port = handle;
     serial_available = true;
+    outln("AImaster: Serial link active");
+    emit_prompt();
 
     // Optional: announce
     serialSend("AImaster: Serial link active\n");

@@ -16,6 +16,7 @@
 #include "rag_adapter.hpp"
 #include "rag_state.hpp"
 #include "rag_int_bridge.hpp"
+#include "io_sink.h"
 
 
 namespace fs = std::filesystem;
