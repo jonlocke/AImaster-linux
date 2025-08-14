@@ -204,7 +204,7 @@ startSerialListener([&](const std::string& line) {
         if (SerialINT_IsActive()) {
             SerialINT_HandleLine(line, config);
         
-serialSend(modelPrompt(config, "> "));
+//serialSend(modelPrompt(config, "> "));
 } else {
             (void)execute_command(line, config, CommandSource::SERIAL);
         }

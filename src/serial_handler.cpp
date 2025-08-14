@@ -73,11 +73,24 @@ bool initSerial(const std::string& port, int baudrate) {
     }
     serial_port = handle;
     serial_available = true;
-    outln("AImaster: Serial link active");
-    emit_prompt();
+    //outln("AImaster: Serial link active");
+    //emit_prompt();
 
     // Optional: announce
-    serialSend("AImaster: Serial link active\n");
+    serialSend("\f");
+    using namespace std::chrono_literals;
+    std::this_thread::sleep_for(1234ms);
+    serialSend("Welcome to AImaster\n\n");
+    std::this_thread::sleep_for(1234ms);
+    serialSend("AImaster: Link active\n");
+    std::this_thread::sleep_for(1234ms);
+    serialSend("AImaster: Online\n");
+    std::this_thread::sleep_for(1234ms);
+    serialSend(": --> Type help for help!\n");
+    std::this_thread::sleep_for(1234ms);
+    serialSend("AImaster: AIinterface active\n\n");
+    std::this_thread::sleep_for(1234ms);
+    emit_prompt();
 
     return true;
 }

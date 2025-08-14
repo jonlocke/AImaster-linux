@@ -1,6 +1,0 @@
-ASK=Ask the model a question and receive an answer.
-READ=Provide context and send the contents of a file to the model for absorption into the current chat.
-RESET=Clear the current chat history (useful to start a fresh conversation).
-WHO=Show current configuration information.
-HELP=List available commands.
-MODEL=List available models and select one.

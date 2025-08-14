@@ -4,6 +4,7 @@
 #include <vector>
 #include <string>
 #include <algorithm>
+#include <command_exec.h>
 
 namespace fs = std::filesystem;
 
@@ -19,24 +20,27 @@ std::string pickFile(const std::string& defaultDir) {
     }
 
     if (files.empty()) {
-        std::cout << "[Error] No files found in " << defaultDir << std::endl;
+        route_output("[Error] No files found in " + defaultDir, true);
         return {};
     }
 
     std::sort(files.begin(), files.end());
 
-    std::cout << "Files in " << defaultDir << ":\n";
+    route_output("Files in " + defaultDir + ":", true);
     for (size_t i = 0; i < files.size(); ++i) {
-        std::cout << "  " << (i + 1) << ") " << files[i] << "\n";
+        //std::cout << "  " << (i + 1) << ") " << files[i] << "\n";
+        route_output(std::to_string(i + 1) + ") " + files[i], true);
     }
 
-    std::cout << "Choose file number (or 0 to cancel): ";
+    //std::cout << "Choose file number (or 0 to cancel): ";
+    route_output("Choose file number (or 0 to cancel): ", true);
     size_t choice = 0;
     std::cin >> choice;
     std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 
     if (choice == 0 || choice > files.size()) {
-        std::cout << "[Cancelled]\n";
+        //std::cout << "[Cancelled]\n";
+        route_output("[Cancelled]", true);
         return {};
     }
 

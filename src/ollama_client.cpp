@@ -322,16 +322,20 @@ bool SerialINT_IsActive() {
 void SerialINT_Start(AppConfig& config) {
     g_serial_int_active.store(true, std::memory_order_relaxed);
     fprintf(stderr, "[DIAG] INT called from source=%d\n", (int)getCurrentCommandSource());
-    route_output("[Interactive Mode] Type your messages. Type /bye to exit.", true);
-    route_output(modelPrompt(config, "-> "), false);
+    route_output("[Interactive Mode] Type your messages. Type /bye to exit.\n", true);
+    route_output("-> ");
 }
 
 void SerialINT_HandleLine(const std::string& line, AppConfig& config) {
     if (line == "/bye") {
         g_serial_int_active.store(false, std::memory_order_relaxed);
         route_output("[Returning to main prompt]", true);
-        route_output(modelPrompt(config, "> "), false);
+        route_output(modelPrompt(config, "-> "), false);
         return;
+    }
+        if (line == "/n") {
+        g_serial_int_active.store(false, std::memory_order_relaxed);
+        route_output(modelPrompt(config, "-> "), false);
     }
     // Try RAG first (if active and enabled)
     std::string rag_answer;
@@ -342,7 +346,7 @@ void SerialINT_HandleLine(const std::string& line, AppConfig& config) {
     }
     // Fall back to normal LLM
     sendMessageToOllama(line, g_chatHistory, config);
-    route_output(modelPrompt(config, "-> "), false);
+    route_output("-> ");
 }
 
 // ---- helpers ----
@@ -459,7 +463,7 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
         return result;
     }
     // ===== WHO =====
-    else if (cmd_upper == "WHO") {
+    else if (cmd_upper == "CFG") {
         result["status"] = "success";
         result["serial_port"] = config.serial_port;
         result["baudrate"] = config.baudrate;
@@ -467,11 +471,14 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
         result["ollama_model"] = config.ollama_model;
         result["ollama_timeout_seconds"] = config.ollama_timeout_seconds;
         route_output("Current configuration:", true);
-        route_output(std::string("  Serial port: ") + config.serial_port, true);
-        route_output(std::string("  Baudrate: ") + std::to_string(config.baudrate), true);
-        route_output(std::string("  Ollama URL: ") + config.ollama_url, true);
-        route_output(std::string("  Model: ") + config.ollama_model, true);
-        route_output(std::string("  Ollama timeout (s): ") + std::to_string(config.ollama_timeout_seconds), true);
+        route_output(std::string("\tSerial port: ") + config.serial_port, true);
+        route_output(std::string("\tBaudrate: ") + std::to_string(config.baudrate), true);
+        route_output(std::string("\tOllama URL: ") + config.ollama_url, true);
+        route_output(std::string("\tModel: ") + config.ollama_model, true);
+        route_output(std::string("\tOllama timeout (s): ") + std::to_string(config.ollama_timeout_seconds), true);
+        route_output(std::string("\tChar delay: ") + std::to_string(config.serial_delay_ms), true);
+        route_output(std::string("\tNewline: ") + config.serial_newline, true);
+        route_output("->", false);
         return result;
     }
     // ===== DELAY =====
@@ -494,6 +501,7 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
         } else {
             route_output(std::string("[OK] serial_delay_ms=") + std::to_string(ms) + " (save failed)", true);
         }
+        route_output("->", false);
         return Json::Value();
     }
     // ===== HELP =====
@@ -509,7 +517,7 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
             cmds["INT"] = "Enter interactive mode with the model.";
             cmds["READ"] = "Send a file with context to the model.";
             cmds["RESET"] = "Clear chat history.";
-            cmds["WHO"] = "Show current configuration.";
+            cmds["CFG"] = "Show current configuration.";
             cmds["HELP"] = "List available commands.";
             cmds["MODEL"] = "List or set Ollama model.";
             cmds["RAG_INGEST"] = "Ingest a folder into the RAG system.";
