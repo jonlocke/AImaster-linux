@@ -150,10 +150,10 @@ void setCurrentCommandSource(CommandSource s) {
 void route_output(const std::string& s, bool newline) {
     const bool use_serial = (tls_source == CommandSource::SERIAL) ||
                             g_serial_override.load(std::memory_order_relaxed);
-::fprintf(stderr, "[DIAG] route_output to=%c src=%d msg=%.40s\n",
+//::fprintf(stderr, "[DIAG] route_output to=%c src=%d msg=%.40s\n",
           (use_serial && serial_available) ? 's' : 'c',
           (int)getCurrentCommandSource(),
-          s.c_str());
+          s.c_str();
 
     if (use_serial && serial_available) {
         std::string cleaned = sanitize_for_serial(s);
