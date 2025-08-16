@@ -4,6 +4,7 @@
 #include "serial_handler.h"       // serialSend, serial_available
 #include "rag_console_commands.hpp"
 #include "rag_int_bridge.hpp"
+#include "utils.h"
 
 #include <curl/curl.h>
 #include <algorithm>
@@ -312,8 +313,241 @@ setCurrentCommandSource(prev);
 
 
 // ================= Serial INT state =================
+
 static std::atomic<bool> g_serial_int_active{false};
 static std::vector<Json::Value> g_chatHistory;
+
+// ================= READ Await (non-blocking prompts) =================
+enum class ReadStage { Idle=0, WaitingContext, WaitingFilename, WaitingContextPresetFile, WaitingPickIndex_ContextKnown, WaitingPickIndex_ThenAskContext };
+static std::atomic<ReadStage> g_read_stage{ReadStage::Idle};
+static std::string g_read_context;
+static std::string g_read_preset_filename;
+static std::vector<std::string> g_read_pick_files;
+static std::string g_read_pick_dir;
+static AppConfig* g_read_cfg = nullptr; // only used transiently; main thread
+
+bool ReadAwait_IsActive() {
+    return g_read_stage.load(std::memory_order_relaxed) != ReadStage::Idle;
+}
+
+void ReadAwait_Start(AppConfig& config) {
+    g_read_cfg = &config;
+    g_read_context.clear();
+    g_read_preset_filename.clear();
+    g_read_stage.store(ReadStage::WaitingContext, std::memory_order_relaxed);
+    // Label + conditional ":" (only for serial to avoid duplicate prompts with readline)
+    route_output("Enter context:", true);
+    if (getCurrentCommandSource() == CommandSource::SERIAL) route_output(": ");
+}
+
+
+
+static void ReadAwait_Reset() {
+    g_read_stage.store(ReadStage::Idle, std::memory_order_relaxed);
+    g_read_context.clear();
+    g_read_preset_filename.clear();
+    g_read_cfg = nullptr;
+}
+
+// List regular files in a directory and prompt for index (non-blocking; next line will carry the index)
+static bool list_dir_and_prompt(const std::string& dir) {
+    namespace fs = std::filesystem;
+    g_read_pick_files.clear();
+    g_read_pick_dir.clear();
+
+    if (!fs::exists(dir) || !fs::is_directory(dir)) {
+        route_output(std::string("[Error] Not a directory: ") + dir, true);
+        return false;
+    }
+
+    for (auto& entry : fs::directory_iterator(dir)) {
+        if (entry.is_regular_file()) {
+            g_read_pick_files.push_back(entry.path().filename().string());
+        }
+    }
+    if (g_read_pick_files.empty()) {
+        route_output("[Error] No files found in " + dir, true);
+        return false;
+    }
+    std::sort(g_read_pick_files.begin(), g_read_pick_files.end());
+
+    route_output("Files in " + dir + ":", true);
+    for (size_t i = 0; i < g_read_pick_files.size(); ++i) {
+        route_output(std::to_string(i+1) + ") " + g_read_pick_files[i], true);
+    }
+    route_output("Choose file number (or 0 to cancel):", true);
+    if (getCurrentCommandSource() == CommandSource::SERIAL) route_output(": ");
+    g_read_pick_dir = dir;
+    return true;
+}
+
+
+
+
+void ReadAwait_StartWithFile(AppConfig& config, const std::string& filename) {
+    g_read_cfg = &config;
+    g_read_context.clear();
+    g_read_preset_filename = filename;
+    g_read_stage.store(ReadStage::WaitingContextPresetFile, std::memory_order_relaxed);
+    route_output("Enter context:", true);
+    if (getCurrentCommandSource() == CommandSource::SERIAL) route_output(": ");
+}
+
+
+
+// --- Added: folder-pick starters for non-blocking selection ---
+void ReadAwait_StartFolderPickWithContext(AppConfig& config, const std::string& ctx, const std::string& dir) {
+    g_read_cfg = &config;
+    g_read_context = ctx;
+    g_read_preset_filename.clear();
+    if (!list_dir_and_prompt(dir)) return;
+    g_read_stage.store(ReadStage::WaitingPickIndex_ContextKnown, std::memory_order_relaxed);
+}
+
+void ReadAwait_StartFolderPickThenAskContext(AppConfig& config, const std::string& dir) {
+    g_read_cfg = &config;
+    g_read_context.clear();
+    g_read_preset_filename.clear();
+    if (!list_dir_and_prompt(dir)) return;
+    g_read_stage.store(ReadStage::WaitingPickIndex_ThenAskContext, std::memory_order_relaxed);
+}
+
+void ReadAwait_HandleLine(const std::string& line, AppConfig& config) {
+    ReadStage st = g_read_stage.load(std::memory_order_relaxed);
+    if (st == ReadStage::WaitingContext) {
+        g_read_context = line;
+        g_read_stage.store(ReadStage::WaitingFilename, std::memory_order_relaxed);
+        route_output("Enter filename:", true);
+        if (getCurrentCommandSource() == CommandSource::SERIAL) route_output(": ");
+        return;
+    }
+    if (st == ReadStage::WaitingFilename) {
+        std::string filename = line;
+        // If a folder path is provided, allow file picker on console
+        if (std::filesystem::is_directory(filename)) {
+            if (getCurrentCommandSource() == CommandSource::CONSOLE) {
+                std::string chosen = pickFile(filename);
+                if (chosen.empty()) {
+                    route_output("[Cancelled]", true);
+                    ReadAwait_Reset();
+                    route_output(modelPrompt(config, SerialINT_IsActive() ? "-> " : "> "));
+                    return;
+                }
+                filename = chosen;
+            } else {
+                route_output("[Error] Folder path given over serial. Please enter a file path.", true);
+                route_output("Enter filename:", true);
+                if (getCurrentCommandSource() == CommandSource::SERIAL) route_output(": ");
+                return;
+            }
+        }
+        // If a folder path is provided, allow file picker on console
+        if (std::filesystem::is_directory(filename)) {
+            if (getCurrentCommandSource() == CommandSource::CONSOLE) {
+                std::string chosen = pickFile(filename);
+                if (chosen.empty()) {
+                    route_output("[Cancelled]", true);
+                    ReadAwait_Reset();
+                    route_output(modelPrompt(config, SerialINT_IsActive() ? "-> " : "> "));
+                    return;
+                }
+                filename = chosen;
+            } else {
+                route_output("[Error] Folder path given over serial. Please enter a file path.", true);
+                route_output("Enter filename:", true);
+                if (getCurrentCommandSource() == CommandSource::SERIAL) route_output(": ");
+                return;
+            }
+        }
+        if (!std::filesystem::exists(filename)) {
+            route_output(std::string("[Error] File does not exist: ") + filename, true);
+            ReadAwait_Reset();
+            return;
+        }
+        if (std::filesystem::is_empty(filename)) {
+            route_output(std::string("[Error] File is empty: ") + filename, true);
+            ReadAwait_Reset();
+            return;
+        }
+        std::ifstream inFile(filename);
+        std::stringstream buffer;
+        buffer << inFile.rdbuf();
+        std::string fileContents = buffer.str();
+        std::string fullMessage =
+            "Context: " + g_read_context +
+            "\n\nFile contents:\n" + fileContents +
+            "\n\nInstruction: Please read and store this content for later reference in our ongoing conversation. "
+            "Acknowledge once you have absorbed it.";
+        sendMessageToOllama(fullMessage, g_chatHistory, config);
+        ReadAwait_Reset();
+        route_output(modelPrompt(config, SerialINT_IsActive() ? "-> " : "> "));
+        return;
+    }
+    if (st == ReadStage::WaitingContextPresetFile) {
+        g_read_context = line;
+        std::string filename = g_read_preset_filename;
+        // If a folder path is provided, allow file picker on console
+        if (std::filesystem::is_directory(filename)) {
+            if (getCurrentCommandSource() == CommandSource::CONSOLE) {
+                std::string chosen = pickFile(filename);
+                if (chosen.empty()) {
+                    route_output("[Cancelled]", true);
+                    ReadAwait_Reset();
+                    route_output(modelPrompt(config, SerialINT_IsActive() ? "-> " : "> "));
+                    return;
+                }
+                filename = chosen;
+            } else {
+                route_output("[Error] Folder path given over serial. Please enter a file path.", true);
+                route_output("Enter filename:", true);
+                if (getCurrentCommandSource() == CommandSource::SERIAL) route_output(": ");
+                return;
+            }
+        }
+        // If a folder path is provided, allow file picker on console
+        if (std::filesystem::is_directory(filename)) {
+            if (getCurrentCommandSource() == CommandSource::CONSOLE) {
+                std::string chosen = pickFile(filename);
+                if (chosen.empty()) {
+                    route_output("[Cancelled]", true);
+                    ReadAwait_Reset();
+                    route_output(modelPrompt(config, SerialINT_IsActive() ? "-> " : "> "));
+                    return;
+                }
+                filename = chosen;
+            } else {
+                route_output("[Error] Folder path given over serial. Please enter a file path.", true);
+                route_output("Enter filename:", true);
+                if (getCurrentCommandSource() == CommandSource::SERIAL) route_output(": ");
+                return;
+            }
+        }
+        if (!std::filesystem::exists(filename)) {
+            route_output(std::string("[Error] File does not exist: ") + filename, true);
+            ReadAwait_Reset();
+            return;
+        }
+        if (std::filesystem::is_empty(filename)) {
+            route_output(std::string("[Error] File is empty: ") + filename, true);
+            ReadAwait_Reset();
+            return;
+        }
+        std::ifstream inFile(filename);
+        std::stringstream buffer;
+        buffer << inFile.rdbuf();
+        std::string fileContents = buffer.str();
+        std::string fullMessage =
+            "Context: " + g_read_context +
+            "\n\nFile contents:\n" + fileContents +
+            "\n\nInstruction: Please read and store this content for later reference in our ongoing conversation. "
+            "Acknowledge once you have absorbed it.";
+        sendMessageToOllama(fullMessage, g_chatHistory, config);
+        ReadAwait_Reset();
+        route_output(modelPrompt(config, SerialINT_IsActive() ? "-> " : "> "));
+        return;
+    }
+    // If idle, ignore
+}
 
 bool SerialINT_IsActive() {
     return g_serial_int_active.load(std::memory_order_relaxed);
@@ -420,47 +654,50 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
         return result;
     }
     // ===== READ =====
-    else if (cmd_upper == "READ" || cmd_upper.rfind("READ_CTX:", 0) == 0) {
-        std::string context;
-        std::string filename;
+    
 
+    else if (cmd_upper == "READ" || cmd_upper.rfind("READ_CTX:", 0) == 0) {
+        // Two modes:
+        //  - "READ" (no args): non-blocking, prompt for context then filename using ReadAwait_*
+        //  - "READ_CTX:<ctx>|FILE:<path>": immediate
         if (cmd_upper.rfind("READ_CTX:", 0) == 0) {
+            std::string context;
+            std::string filename;
             size_t ctxPos = command.find(":") + 1;
             size_t filePos = command.find("|FILE:");
             context = command.substr(ctxPos, filePos - ctxPos);
             filename = command.substr(filePos + 6);
+
+            if (!std::filesystem::exists(filename)) {
+                route_output(std::string("[Error] File does not exist: ") + filename, true);
+                result["status"] = "error";
+                return result;
+            }
+            if (std::filesystem::is_empty(filename)) {
+                route_output(std::string("[Error] File is empty: ") + filename, true);
+                result["status"] = "error";
+                return result;
+            }
+
+            std::ifstream inFile(filename);
+            std::stringstream buffer;
+            buffer << inFile.rdbuf();
+            std::string fileContents = buffer.str();
+
+            std::string fullMessage =
+                "Context: " + context +
+                "\\n\\nFile contents:\\n" + fileContents +
+                "\\n\\nInstruction: Please read and store this content for later reference in our ongoing conversation. "
+                "Acknowledge once you have absorbed it.";
+
+            sendMessageToOllama(fullMessage, chatHistory, config);
+            result["status"] = "success";
+            return result;
         } else {
-            route_output("Enter context: ", false);
-            std::getline(std::cin, context);
-            route_output("Enter filename: ", false);
-            std::getline(std::cin, filename);
-        }
-
-        if (!std::filesystem::exists(filename)) {
-            route_output(std::string("[Error] File does not exist: ") + filename, true);
-            result["status"] = "error";
+            ReadAwait_Start(config);
+            result["status"] = "pending";
             return result;
         }
-        if (std::filesystem::is_empty(filename)) {
-            route_output(std::string("[Error] File is empty: ") + filename, true);
-            result["status"] = "error";
-            return result;
-        }
-
-        std::ifstream inFile(filename);
-        std::stringstream buffer;
-        buffer << inFile.rdbuf();
-        std::string fileContents = buffer.str();
-
-        std::string fullMessage =
-            "Context: " + context +
-            "\n\nFile contents:\n" + fileContents +
-            "\n\nInstruction: Please read and store this content for later reference in our ongoing conversation. "
-            "Acknowledge once you have absorbed it.";
-
-        sendMessageToOllama(fullMessage, chatHistory, config);
-        result["status"] = "success";
-        return result;
     }
     // ===== WHO =====
     else if (cmd_upper == "CFG") {
