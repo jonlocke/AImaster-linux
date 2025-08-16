@@ -12,3 +12,4 @@ sudo snap start ollama
 ollama pull gemma3:4b
 ollama pull gemma3:4b-it-qat
 ollama pull nomic-embed-text
+ollama pull mxbai-embed-large
