@@ -7,3 +7,4 @@ MODEL,List available models and select one.
 RAG_INGEST,Ingest a folder into the RAG system.
 RAG_SHOW,Show the contents of the RAG ingestion.
 RAG_SESSION,Display the session information.
+DELAY,Set the Chars per second (CPS) delay for responses.

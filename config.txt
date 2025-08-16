@@ -1,7 +1,7 @@
 # AImaster configuration (key=value)
 serial_port=/dev/ttyUSB0
 baudrate=2400
-serial_delay_ms=55
+serial_delay_ms=87
 serial_newline=LFCR
 ollama_url=http://192.168.1.154:11434/api/chat
 ollama_model=gemma3:4b
