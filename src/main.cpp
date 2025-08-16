@@ -201,8 +201,7 @@ startSerialListener([&](const std::string& line) {
                 ::fprintf(stderr, "[DIAG] serial listener: setting src=SERIAL\n");
 
 
-        if (ReadAwait_IsActive()) { ReadAwait_HandleLine(line, config); }
-        else if (SerialINT_IsActive()) {
+        if (SerialINT_IsActive()) {
             SerialINT_HandleLine(line, config);
         
 //serialSend(modelPrompt(config, "> "));
@@ -242,30 +241,31 @@ char* input = readline(prompt.c_str());
 
         std::string cmd_upper = command;
         std::transform(cmd_upper.begin(), cmd_upper.end(), cmd_upper.begin(), ::toupper);
-        // READ: now handled non-blocking inside execute_command (prompts via route_output)
-        {
-        }
 
+        // If READ entered with no args → interactive picker
+        if (cmd_upper == "READ") {
+            std::string context;
+            std::cout << "Enter context: ";
+            std::getline(std::cin, context);
+
+            std::string filename = pickFile("code");
+            if (filename.empty()) continue;
+
+            command = "READ_CTX:" + context + "|FILE:" + filename;
+        }
 
         if (ReadAwait_IsActive()) { ReadAwait_HandleLine(command, config); continue; }
-        {
-            // Console-only file picker: READPICK[:<context>]
-            std::string cmd_upper_tmp = command;
-            std::transform(cmd_upper_tmp.begin(), cmd_upper_tmp.end(), cmd_upper_tmp.begin(), ::toupper);
-            if (cmd_upper_tmp.rfind("READPICK", 0) == 0) {
-                std::string ctx;
-                size_t colon = command.find(":");
-                if (colon != std::string::npos) ctx = command.substr(colon+1);
-                std::string folder = "code";
-                if (!ctx.empty()) {
-                    ReadAwait_StartFolderPickWithContext(config, ctx, folder);
-                } else {
-                    ReadAwait_StartFolderPickThenAskContext(config, folder);
-                }
-                continue;
-            }
-        }
-        Json::Value result = execute_command(command, config, CommandSource::CONSOLE);
+{
+    std::string cmd_upper_tmp = command; std::transform(cmd_upper_tmp.begin(), cmd_upper_tmp.end(), cmd_upper_tmp.begin(), ::toupper);
+    if (cmd_upper_tmp.rfind("READPICK", 0) == 0) {
+        std::string ctx; size_t colon = command.find(":"); if (colon != std::string::npos) ctx = command.substr(colon+1);
+        std::string folder = "code";
+        if (!ctx.empty()) { ReadAwait_StartFolderPickWithContext(config, ctx, folder); }
+        else { ReadAwait_StartFolderPickThenAskContext(config, folder); }
+        continue;
+    }
+}
+Json::Value result = execute_command(command, config, CommandSource::CONSOLE);
     }
 
     // Save history on exit

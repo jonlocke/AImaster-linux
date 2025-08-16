@@ -16,13 +16,10 @@ bool SerialINT_IsActive();
 void SerialINT_Start(AppConfig& config);
 void SerialINT_HandleLine(const std::string& line, AppConfig& config);
 
-// Non-blocking READ (interactive prompts for context + filename)
+// Non-blocking READ (interactive)
 bool ReadAwait_IsActive();
 void ReadAwait_Start(AppConfig& config);
-void ReadAwait_HandleLine(const std::string& line, AppConfig& config);
-
 void ReadAwait_StartWithFile(AppConfig& config, const std::string& filename);
-
 void ReadAwait_StartFolderPickWithContext(AppConfig& config, const std::string& ctx, const std::string& dir);
-
 void ReadAwait_StartFolderPickThenAskContext(AppConfig& config, const std::string& dir);
+void ReadAwait_HandleLine(const std::string& line, AppConfig& config);
