@@ -254,7 +254,7 @@ char* input = readline(prompt.c_str());
             command = "READ_CTX:" + context + "|FILE:" + filename;
         }
 
-        if (ReadAwait_IsActive()) { ReadAwait_HandleLine(command, config); continue; }
+        if (ReadAwait_TryHandleLine(command, config)) { continue; }
 {
     std::string cmd_upper_tmp = command; std::transform(cmd_upper_tmp.begin(), cmd_upper_tmp.end(), cmd_upper_tmp.begin(), ::toupper);
     if (cmd_upper_tmp.rfind("READPICK", 0) == 0) {

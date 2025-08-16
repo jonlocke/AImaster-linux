@@ -711,3 +711,17 @@ void ReadAwait_HandleLine(const std::string& line, AppConfig& config) {
         }
     }
 }
+
+
+bool ReadAwait_TryHandleLine(const std::string& line, AppConfig& config) {
+    ReadStage st = g_read_stage.load(std::memory_order_relaxed);
+    if (st == ReadStage::Idle) return false; // not active, let caller handle normally
+    // Allow user to cancel the flow
+    if (line == "/cancel" || line == "/CANCEL") {
+        ReadAwait_Reset();
+        route_output(modelPrompt(config, SerialINT_IsActive() ? "-> " : "> "));
+        return true;
+    }
+    ReadAwait_HandleLine(line, config);
+    return true;
+}

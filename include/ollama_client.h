@@ -23,3 +23,5 @@ void ReadAwait_StartWithFile(AppConfig& config, const std::string& filename);
 void ReadAwait_StartFolderPickWithContext(AppConfig& config, const std::string& ctx, const std::string& dir);
 void ReadAwait_StartFolderPickThenAskContext(AppConfig& config, const std::string& dir);
 void ReadAwait_HandleLine(const std::string& line, AppConfig& config);
+
+bool ReadAwait_TryHandleLine(const std::string& line, AppConfig& config);
