@@ -23,4 +23,6 @@ void stopSerialListener();
 
 void closeSerial();
 
+void serialSend(const std::string& data);
+
 #endif

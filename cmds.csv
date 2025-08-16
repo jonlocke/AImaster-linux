@@ -1,6 +1,10 @@
-ASK:Ask the model a question and receive an answer.
-READ:Provide context and send the contents of a file to the model for absorption into the current chat.
-RESET:Clear the current chat history (useful to start a fresh conversation).
-CFG:Show current configuration information.
-HELP:List available commands.
-MODEL:List available models and select one.
+ASK,Ask the model a question and receive an answer.
+READ,Provide context and send the contents of a file to the model for absorption into the current chat.
+RESET,Clear the current chat history (useful to start a fresh conversation).
+CFG,Show current configuration information.
+HELP,List available commands.
+MODEL,List available models and select one.
+RAG_INGEST,Ingest a folder into the RAG system.
+RAG_SHOW,Show the contents of the RAG ingestion.
+RAG_SESSION,Display the session information.
+DELAY,Set the Chars per second (CPS) delay for responses.
