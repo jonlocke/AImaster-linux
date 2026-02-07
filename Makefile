@@ -1,5 +1,5 @@
 CXX = g++
-CXXFLAGS = -Wall -std=c++17 -Iinclude -I/usr/include/poppler/cpp
+CXXFLAGS = -Wall -std=c++17 -Iinclude -I/usr/include/poppler/cpp -I/usr/include/jsoncpp
 LDFLAGS = -lserialport -ljsoncpp -lcurl -lreadline -lpoppler-cpp -ltesseract
 
 TARGET = AImaster

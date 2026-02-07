@@ -273,7 +273,7 @@ static bool sendMessageToOllama(const std::string& query,
     // If the caller is SERIAL (INT), force serial while streaming; otherwise leave as-is.
 const CommandSource prev = getCurrentCommandSource();
 setCurrentCommandSource(prev);   // assert caller’s route for this thread
-    route_output("[Thinking..]", true);
+    route_output("[Thinking.....:-).......]", true);
 
     // cURL setup
     curl_easy_setopt(curl, CURLOPT_URL,        config.ollama_url.c_str());
@@ -393,6 +393,16 @@ static std::string trim(std::string s){ return rtrim(ltrim(s)); }
 
 // ================= Dispatcher =================
 Json::Value processCommand(const std::string& command, AppConfig& config) {
+
+    std::fprintf(stderr, "[processCommand] src=%d raw='%s'\n",
+                (int)getCurrentCommandSource(), command.c_str());
+    std::fflush(stderr);
+
+    if (getCurrentCommandSource() == CommandSource::SERIAL) {
+        std::fprintf(stderr, "[RX_CMD] '%s'\n", command.c_str());
+        std::fflush(stderr);
+    }
+
     Json::Value ragOut;
     if (HandleRAGConsoleCommand(command, ragOut)) {
         return ragOut; // handled RAG_INGEST / RAG_ASK / RAG_SESSION / etc
@@ -494,7 +504,7 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
         result["baudrate"] = config.baudrate;
         result["ollama_url"] = config.ollama_url;
         result["ollama_model"] = config.ollama_model;
-        result["ollama_timeout_seconds"] = config.ollama_timeout_seconds;
+        result["ollama_timeout_seconds"] = Json::Value(static_cast<Json::UInt64>(config.ollama_timeout_seconds));
         route_output("Current configuration:", true);
         route_output(std::string("\tSerial port: ") + config.serial_port, true);
         route_output(std::string("\tBaudrate: ") + std::to_string(config.baudrate), true);
