@@ -50,3 +50,4 @@ testDocs/*
 # outputted code
 code/*.txt
 ollama_cli
+aimaster
