@@ -198,7 +198,9 @@ if (serial_available) {
 startSerialListener([&](const std::string& line) {
     try {
                 setCurrentCommandSource(CommandSource::SERIAL);  // <-- add this line
-                ::fprintf(stderr, "[DIAG] serial listener: setting src=SERIAL\n");
+                if (IsDiagnosticModeEnabled()) {
+                    ::fprintf(stderr, "[DIAG] serial listener: setting src=SERIAL\n");
+                }
 
 
         if (SerialINT_IsActive()) {

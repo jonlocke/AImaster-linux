@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <cstdarg>
 #include <sstream>
 #include <vector>
 #include "route_context.h"
@@ -127,6 +128,18 @@ struct StreamData {
     bool first_chunk_received = false;
 };
 static bool diagMode = false; // Diagnostic dump mode
+
+static void diag_log(const char* fmt, ...) {
+    if (!diagMode) return;
+    va_list args;
+    va_start(args, fmt);
+    std::vfprintf(stderr, fmt, args);
+    va_end(args);
+}
+
+bool IsDiagnosticModeEnabled() {
+    return diagMode;
+}
 
 namespace {
     void saveCodeBlocks(const std::string& text) {
@@ -243,7 +256,7 @@ static void setCurlStreamingOptions(CURL* curl, struct curl_slist*& headers) {
 static bool sendMessageToOllama(const std::string& query,
                                 std::vector<Json::Value>& chatHistory,
                                 const AppConfig& config) {
-   ::fprintf(stderr, "[DIAG] sendMessage caller src=%d\n", (int)getCurrentCommandSource());
+   diag_log("[DIAG] sendMessage caller src=%d\n", (int)getCurrentCommandSource());
  // Add user message to history
     Json::Value msg;
     msg["role"] = "user";
@@ -346,7 +359,7 @@ bool SerialINT_IsActive() {
 
 void SerialINT_Start(AppConfig& config) {
     g_serial_int_active.store(true, std::memory_order_relaxed);
-    fprintf(stderr, "[DIAG] INT called from source=%d\n", (int)getCurrentCommandSource());
+    diag_log("[DIAG] INT called from source=%d\n", (int)getCurrentCommandSource());
     route_output("[Interactive Mode] Type your messages. Type /bye to exit.\n", true);
     route_output("-> ");
 }
@@ -394,13 +407,13 @@ static std::string trim(std::string s){ return rtrim(ltrim(s)); }
 // ================= Dispatcher =================
 Json::Value processCommand(const std::string& command, AppConfig& config) {
 
-    std::fprintf(stderr, "[processCommand] src=%d raw='%s'\n",
-                (int)getCurrentCommandSource(), command.c_str());
-    std::fflush(stderr);
+    diag_log("[processCommand] src=%d raw='%s'\n",
+             (int)getCurrentCommandSource(), command.c_str());
+    if (diagMode) std::fflush(stderr);
 
     if (getCurrentCommandSource() == CommandSource::SERIAL) {
-        std::fprintf(stderr, "[RX_CMD] '%s'\n", command.c_str());
-        std::fflush(stderr);
+        diag_log("[RX_CMD] '%s'\n", command.c_str());
+        if (diagMode) std::fflush(stderr);
     }
 
     Json::Value ragOut;
