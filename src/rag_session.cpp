@@ -9,6 +9,7 @@
 #include <iostream>
 #include <numeric>
 #include <random>
+#include <regex>
 #include <sstream>
 #include <unordered_set>
 
@@ -146,6 +147,32 @@ std::vector<std::string> RAGSessionManager::split_chunks(const std::string& s, s
 static size_t wr(void* ptr, size_t sz, size_t nm, void* ud) {
     ((std::string*)ud)->append((char*)ptr, sz * nm);
     return sz * nm;
+}
+
+static std::optional<int> requested_page_number(const std::string& q) {
+    std::regex re(R"((?:^|\b)page\s+(\d{1,4})(?:\b|$))", std::regex_constants::icase);
+    std::smatch m;
+    if (std::regex_search(q, m, re)) {
+        try {
+            int p = std::stoi(m[1].str());
+            if (p > 0) return p;
+        } catch (...) {}
+    }
+    return std::nullopt;
+}
+
+static std::optional<int> chunk_page_number(const std::string& id) {
+    auto pos = id.find("#p");
+    if (pos == std::string::npos) return std::nullopt;
+    pos += 2;
+    size_t end = pos;
+    while (end < id.size() && std::isdigit(static_cast<unsigned char>(id[end]))) ++end;
+    if (end == pos) return std::nullopt;
+    try {
+        int p = std::stoi(id.substr(pos, end - pos));
+        if (p > 0) return p;
+    } catch (...) {}
+    return std::nullopt;
 }
 
 
@@ -375,44 +402,75 @@ std::string RAGSessionManager::createSessionFromFolder(const std::string& folder
         log("[" + std::to_string(n) + "/" + std::to_string(pdfs.size()) + "] Extracting text: " + pdf);
 
         auto t0 = std::chrono::steady_clock::now();
-        auto text = extract_text_poppler(pdf);
+        std::vector<std::pair<int, std::string>> page_texts;
+        {
+            std::unique_ptr<poppler::document> d(poppler::document::load_from_file(pdf));
+            if (d) {
+                for (int page = 0; page < d->pages(); ++page) {
+                    std::unique_ptr<poppler::page> pg(d->create_page(page));
+                    if (!pg) continue;
+                    auto ba = pg->text().to_utf8();
+                    std::string page_text(ba.begin(), ba.end());
+                    if (!page_text.empty()) page_texts.push_back({page + 1, std::move(page_text)});
+                }
+            }
+        }
         auto t1 = std::chrono::steady_clock::now();
 
         log("  Text extracted in " + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count()) + " ms.");
 
-        if (text.size() < 40) {
+        size_t extracted_chars = 0;
+        for (const auto& page : page_texts) extracted_chars += page.second.size();
+
+        if (extracted_chars < 40) {
             log("  WARNING: Very little/no text extracted. Falling back to OCR via Poppler+Tesseract...");
             auto o0 = std::chrono::steady_clock::now();
             auto ocr = ocr_pdf_with_poppler_tesseract(pdf, 200);
             auto o1 = std::chrono::steady_clock::now();
             log("  OCR completed in " + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(o1 - o0).count()) + " ms.");
-            if (!ocr.empty()) text.swap(ocr);
+            if (!ocr.empty()) {
+                page_texts.clear();
+                page_texts.push_back({1, std::move(ocr)});
+            }
         }
 
-        auto chunks = split_chunks(text, 1024, 100);
-        log("  Chunking: " + std::to_string(chunks.size()) + " chunks.");
+        std::vector<std::pair<int, std::vector<std::string>>> page_chunks;
+        size_t pdf_total_chunks = 0;
+        for (const auto& page : page_texts) {
+            auto chunks = split_chunks(page.second, 1024, 100);
+            if (!chunks.empty()) {
+                pdf_total_chunks += chunks.size();
+                page_chunks.push_back({page.first, std::move(chunks)});
+            }
+        }
 
-        total_chunks += chunks.size();
+        log("  Chunking: " + std::to_string(pdf_total_chunks) + " chunks.");
+
+        total_chunks += pdf_total_chunks;
         size_t cnum = 0;
-        for (size_t i = 0; i < chunks.size(); ++i) {
-            ++cnum;
-            if (cnum % 25 == 1 || cnum == chunks.size()) {
-                log("    Embedding chunk " + std::to_string(cnum) + "/" + std::to_string(chunks.size()));
+        for (auto& page_group : page_chunks) {
+            int page_num = page_group.first;
+            auto& chunks = page_group.second;
+            for (size_t i = 0; i < chunks.size(); ++i) {
+                ++cnum;
+                if (cnum % 25 == 1 || cnum == pdf_total_chunks) {
+                    log("    Embedding chunk " + std::to_string(cnum) + "/" + std::to_string(pdf_total_chunks));
+                }
+
+                Chunk c;
+                c.id = pdf + "#p" + std::to_string(page_num) + "-c" + std::to_string(i);
+                c.text = "SOURCE: " + pdf + " page " + std::to_string(page_num) + "\n" + std::move(chunks[i]);
+                c.embedding = embed(c.text);
+
+                if (c.embedding.empty()) {
+                    ++failed_embeddings;
+                    log("    WARNING: embedding failed for " + c.id + " using model '" + embed_model_ + "'");
+                    continue;
+                }
+
+                idx.chunks.push_back(std::move(c));
+                ++embedded_chunks;
             }
-
-            Chunk c;
-            c.id = pdf + "#" + std::to_string(i);
-            c.text = std::move(chunks[i]);
-            c.embedding = embed(c.text);
-
-            if (c.embedding.empty()) {
-                ++failed_embeddings;
-                log("    WARNING: embedding failed for " + c.id + " using model '" + embed_model_ + "'");
-                continue;
-            }
-
-            idx.chunks.push_back(std::move(c));
-            ++embedded_chunks;
         }
     }
 
@@ -464,10 +522,29 @@ std::string RAGSessionManager::chat(const std::string& sid, const std::string& m
 
     std::string ctx;
     int added = 0;
+    std::vector<bool> selected(idx.chunks.size(), false);
+
+    if (auto req_page = requested_page_number(msg)) {
+        for (size_t i = 0; i < idx.chunks.size() && added < k; ++i) {
+            auto page = chunk_page_number(idx.chunks[i].id);
+            if (page && *page == *req_page) {
+                ctx += idx.chunks[i].text + "\n\n";
+                selected[i] = true;
+                ++added;
+            }
+        }
+        if (verbose_ && added > 0) {
+            log("Page-directed retrieval selected " + std::to_string(added) + " chunk(s) from page " + std::to_string(*req_page) + ".");
+        }
+    }
+
     for (const auto& p : sc) {
+        if (added >= k) break;
         if (p.first < thr) break;
+        if (selected[p.second]) continue;
         ctx += idx.chunks[p.second].text + "\n\n";
-        if (++added >= k) break;
+        selected[p.second] = true;
+        ++added;
     }
 
     // If semantic retrieval misses, fall back to token-overlap retrieval.
@@ -486,8 +563,11 @@ std::string RAGSessionManager::chat(const std::string& sid, const std::string& m
             }
             std::sort(lexical.begin(), lexical.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
             for (const auto& p : lexical) {
+                if (added >= k) break;
+                if (selected[p.second]) continue;
                 ctx += idx.chunks[p.second].text + "\n\n";
-                if (++added >= k) break;
+                selected[p.second] = true;
+                ++added;
             }
             if (verbose_ && !lexical.empty()) {
                 log("Lexical fallback selected " + std::to_string(std::min<int>(k, (int)lexical.size())) + " chunk(s).");
