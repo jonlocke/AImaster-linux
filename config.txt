@@ -6,5 +6,7 @@ serial_newline=CR
 ollama_url=http://192.168.1.154:11434/api/chat
 ollama_model=qwen3:4b-16k
 ollama_timeout_seconds=2
+rag_chunks=25
+rag_threshold=0.2
 serial_wrap_cols=79
 commands_csv=cmds.csv

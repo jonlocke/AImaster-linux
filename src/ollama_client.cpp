@@ -378,7 +378,7 @@ void SerialINT_HandleLine(const std::string& line, AppConfig& config) {
     }
     // Try RAG first (if active and enabled)
     std::string rag_answer;
-    if (rag_int::TryRAGAnswer(line, rag_answer, /*k=*/5, /*threshold=*/0.2)) {
+    if (rag_int::TryRAGAnswer(line, rag_answer, /*k=*/config.rag_chunks, /*threshold=*/config.rag_threshold)) {
         route_output(rag_answer, true);
         route_output("-> ", false);
         return;
@@ -453,7 +453,7 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
 
         // Try RAG first (if active)
         std::string rag_answer;
-        if (rag_int::TryRAGAnswer(query, rag_answer, /*k=*/5, /*threshold=*/0.2)) {
+        if (rag_int::TryRAGAnswer(query, rag_answer, /*k=*/config.rag_chunks, /*threshold=*/config.rag_threshold)) {
             route_output(rag_answer, true);
             result["status"] = "success";
         } else {
@@ -520,12 +520,16 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
         result["ollama_url"] = config.ollama_url;
         result["ollama_model"] = config.ollama_model;
         result["ollama_timeout_seconds"] = Json::Value(static_cast<Json::UInt64>(config.ollama_timeout_seconds));
+        result["rag_chunks"] = config.rag_chunks;
+        result["rag_threshold"] = config.rag_threshold;
         route_output("Current configuration:", true);
         route_output(std::string("\tSerial port: ") + config.serial_port, true);
         route_output(std::string("\tBaudrate: ") + std::to_string(config.baudrate), true);
         route_output(std::string("\tOllama URL: ") + config.ollama_url, true);
         route_output(std::string("\tModel: ") + config.ollama_model, true);
         route_output(std::string("\tOllama timeout (s): ") + std::to_string(config.ollama_timeout_seconds), true);
+        route_output(std::string("\tRAG chunks (ASK/INT): ") + std::to_string(config.rag_chunks), true);
+        route_output(std::string("\tRAG threshold (ASK/INT): ") + std::to_string(config.rag_threshold), true);
         route_output(std::string("\tChar delay: ") + std::to_string(config.serial_delay_ms), true);
         route_output(std::string("\tNewline: ") + config.serial_newline, true);
         route_output("->", false);
@@ -572,7 +576,7 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
             cmds["MODEL"] = "List or set Ollama model.";
             cmds["RAG_INGEST"] = "Ingest a folder into the RAG system.";
             cmds["RAG_SHOW"] = "Show the contents of the RAG ingestion.";
-            cmds["RAG_ASK"] = "Ask RAG: RAG_ASK [--k N] [--thr T] <question...> (falls back to top-k if best score > 0.0).";
+            cmds["RAG_ASK"] = "Ask RAG: RAG_ASK [--k N] [--thr T] <question...> (ASK/INT defaults use config: rag_chunks, rag_threshold).";
             cmds["RAG_SESSION"] = "Display the session information.";
         }
         result["commands"] = cmds;
