@@ -95,9 +95,9 @@ static std::vector<std::string> fetch_ollama_models(const std::string& chat_url,
         error = "JSON parse error: " + errs;
         return models;
     }
-    if (root.isMember("models") && root["models"].isArray()) {
+    if (root.isObject() && root.isMember("models") && root["models"].isArray()) {
         for (const auto& m : root["models"]) {
-            if (m.isMember("name") && m["name"].isString()) {
+            if (m.isObject() && m.isMember("name") && m["name"].isString()) {
                 models.push_back(m["name"].asString());
             }
         }
