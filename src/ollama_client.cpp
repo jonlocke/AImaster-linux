@@ -355,18 +355,18 @@ void SerialINT_HandleLine(const std::string& line, AppConfig& config) {
     if (line == "/bye") {
         g_serial_int_active.store(false, std::memory_order_relaxed);
         route_output("[Returning to main prompt]", true);
-        route_output(modelPrompt(config, "-> "), false);
+        route_output(modelPrompt(config, "> "), false);
         return;
     }
         if (line == "/n") {
         g_serial_int_active.store(false, std::memory_order_relaxed);
-        route_output(modelPrompt(config, "-> "), false);
+        route_output(modelPrompt(config, "> "), false);
     }
     // Try RAG first (if active and enabled)
     std::string rag_answer;
     if (rag_int::TryRAGAnswer(line, rag_answer, /*k=*/5, /*threshold=*/0.2)) {
         route_output(rag_answer, true);
-        route_output(modelPrompt(config, "-> "), false);
+        route_output("-> ", false);
         return;
     }
     // Fall back to normal LLM

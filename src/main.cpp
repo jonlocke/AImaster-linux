@@ -225,10 +225,16 @@ startSerialListener([&](const std::string& line) {
     std::cout << "\033[38;2;255;215;0mAImaster CLI\033[0m\n\033[38;2;255;239;184mType HELP for a list of commands.\033[0m\n";
 
     while (true) {
-        std::string prompt = ReadAwait_IsActive()
-    ? ": "
-    : ("[38;2;255;239;184m" + config.ollama_model + "> [0m");
-char* input = readline(prompt.c_str());
+        std::string prompt;
+        if (ReadAwait_IsActive()) {
+            prompt = ": ";
+        } else if (SerialINT_IsActive()) {
+            prompt = "-> ";
+        } else {
+            prompt = "[38;2;255;239;184m" + config.ollama_model + "> [0m";
+        }
+
+        char* input = readline(prompt.c_str());
         if (!input) break;
 
         if (*input) {
@@ -265,7 +271,13 @@ char* input = readline(prompt.c_str());
         continue;
     }
 }
-Json::Value result = execute_command(command, config, CommandSource::CONSOLE);
+        if (SerialINT_IsActive()) {
+            setCurrentCommandSource(CommandSource::CONSOLE);
+            SerialINT_HandleLine(command, config);
+            continue;
+        }
+
+        Json::Value result = execute_command(command, config, CommandSource::CONSOLE);
     }
 
     // Save history on exit
@@ -273,4 +285,3 @@ Json::Value result = execute_command(command, config, CommandSource::CONSOLE);
 
     return 0;
 }
-
