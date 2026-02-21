@@ -146,7 +146,88 @@ static size_t wr(void* ptr, size_t sz, size_t nm, void* ud) {
     return sz * nm;
 }
 
+
+bool RAGSessionManager::ensure_embedding_model_available() {
+    if (embed_model_ready_) return true;
+
+    auto has_model = [&](const json& tags) {
+        if (!tags.is_object() || !tags.contains("models") || !tags["models"].is_array()) return false;
+        for (const auto& m : tags["models"]) {
+            if (!m.is_object()) continue;
+            std::string name = m.value("name", "");
+            std::string model = m.value("model", "");
+            if (name == embed_model_ || model == embed_model_) return true;
+            if (!name.empty() && name.rfind(embed_model_ + ":", 0) == 0) return true;
+            if (!model.empty() && model.rfind(embed_model_ + ":", 0) == 0) return true;
+        }
+        return false;
+    };
+
+    auto fetch_tags = [&]() -> json {
+        CURL* c = curl_easy_init();
+        if (!c) return json();
+
+        std::string resp;
+        std::string url = ollama_url_ + "/api/tags";
+        curl_easy_setopt(c, CURLOPT_URL, url.c_str());
+        curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, wr);
+        curl_easy_setopt(c, CURLOPT_WRITEDATA, &resp);
+
+        CURLcode rc = curl_easy_perform(c);
+        curl_easy_cleanup(c);
+        if (rc != CURLE_OK) return json();
+
+        return json::parse(resp, nullptr, false);
+    };
+
+    auto tags = fetch_tags();
+    if (has_model(tags)) {
+        embed_model_ready_ = true;
+        return true;
+    }
+
+    log("Embedding model '" + embed_model_ + "' not found locally; pulling it from Ollama.");
+
+    CURL* c = curl_easy_init();
+    if (!c) return false;
+
+    std::string url = ollama_url_ + "/api/pull";
+    std::string resp;
+    json payload = {{"name", embed_model_}, {"stream", false}};
+
+    struct curl_slist* h = nullptr;
+    h = curl_slist_append(h, "Content-Type: application/json");
+
+    curl_easy_setopt(c, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(c, CURLOPT_HTTPHEADER, h);
+    auto body = payload.dump(-1, ' ', false, json::error_handler_t::replace);
+    curl_easy_setopt(c, CURLOPT_POSTFIELDS, body.c_str());
+    curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, wr);
+    curl_easy_setopt(c, CURLOPT_WRITEDATA, &resp);
+
+    CURLcode rc = curl_easy_perform(c);
+    curl_slist_free_all(h);
+    curl_easy_cleanup(c);
+
+    if (rc != CURLE_OK) return false;
+
+    auto pull = json::parse(resp, nullptr, false);
+    if (pull.is_object() && pull.contains("error")) {
+        log("Failed to pull embedding model '" + embed_model_ + "': " + pull["error"].get<std::string>());
+        return false;
+    }
+
+    tags = fetch_tags();
+    embed_model_ready_ = has_model(tags);
+    return embed_model_ready_;
+}
+
 std::vector<float> RAGSessionManager::embed(const std::string& t) {
+    if (!ensure_embedding_model_available()) {
+        log("ERROR: embedding model '" + embed_model_ + "' is unavailable in Ollama.");
+        return {};
+    }
+
     CURL* c = curl_easy_init();
     if (!c) return {};
 
