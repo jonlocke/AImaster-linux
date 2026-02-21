@@ -52,3 +52,5 @@ code/*.txt
 ollama_cli
 AImaster
 AImaster
+AImaster
+.gitignore
