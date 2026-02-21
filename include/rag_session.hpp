@@ -19,6 +19,7 @@ public:
   std::vector<float> embed(const std::string& text);
   std::string sessionDir(const std::string& sid) const;
   const std::string& ollamaUrl() const { return ollama_url_; }
+  const std::string& llmModel() const { return llm_model_; }
   void save_index(const SessionIndex& idx) const;
   std::optional<SessionIndex> load_index(const std::string& sid) const;
 

@@ -18,6 +18,10 @@ static bool parse_long(const std::string& s, long& out) {
     try { size_t idx=0; long v=std::stol(s,&idx,10); if (idx!=s.size()) return false; out=v; return true; }
     catch(...) { return false; }
 }
+static bool parse_double(const std::string& s, double& out) {
+    try { size_t idx=0; double v=std::stod(s,&idx); if (idx!=s.size()) return false; out=v; return true; }
+    catch(...) { return false; }
+}
 
 static void load_commands_csv(const std::string& path, std::map<std::string,std::string>& out_map) {
     std::ifstream in(path);
@@ -64,6 +68,8 @@ bool loadConfig(const std::string& path, AppConfig& out) {
         else if (key == "ollama_url")  out.ollama_url = val;
         else if (key == "ollama_model") out.ollama_model = val;
         else if (key == "ollama_timeout_seconds") { long v; if (parse_long(val, v) && v>=0) out.ollama_timeout_seconds = v; }
+        else if (key == "rag_chunks") { int v; if (parse_int(val, v) && v > 0) out.rag_chunks = v; }
+        else if (key == "rag_threshold") { double v; if (parse_double(val, v) && v >= 0.0) out.rag_threshold = v; }
         else if (key == "commands_csv") { out.commands_csv_path = val; load_commands_csv(val, out.commands); }
         else if (key == "serial_wrap_cols") {
     int v; if (parse_int(val, v)) {
@@ -91,6 +97,8 @@ bool saveConfig(const std::string& path, const AppConfig& cfg) {
     out << "ollama_url=" << cfg.ollama_url << "\n";
     out << "ollama_model=" << cfg.ollama_model << "\n";
     out << "ollama_timeout_seconds=" << cfg.ollama_timeout_seconds << "\n";
+    out << "rag_chunks=" << cfg.rag_chunks << "\n";
+    out << "rag_threshold=" << cfg.rag_threshold << "\n";
     out << "serial_wrap_cols=" << cfg.serial_wrap_cols << "\n";
     if (!cfg.commands_csv_path.empty()) out << "commands_csv=" << cfg.commands_csv_path << "\n";
     else out << "# commands_csv=cmds.csv\n";

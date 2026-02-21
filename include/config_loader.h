@@ -18,6 +18,10 @@ struct AppConfig {
     std::string ollama_model = "gemma3:4b";
     long ollama_timeout_seconds = 5;
 
+    // RAG retrieval defaults (used by ASK/INT when RAG is active)
+    int rag_chunks = 25;
+    double rag_threshold = 0.2;
+
     // Commands
     std::map<std::string, std::string> commands;
     std::string commands_csv_path;

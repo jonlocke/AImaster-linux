@@ -31,8 +31,9 @@ inline bool HandleRAGConsoleCommand(const std::string& line, Json::Value& out) {
 
     // RAG_INGEST <folder>
     if (cmd == "RAG_INGEST") {
-        if (tokens.size() < 2) {
-            std::cout << "Usage: RAG_INGEST <folder>\n";
+        if (tokens.size() != 2) {
+            std::cout << "Usage: RAG_INGEST <folder>\n"
+                      << "Note: RAG_INGEST accepts only a folder path (no flags). Use RAG_ASK --k/--thr for retrieval tuning.\n";
             out["ok"] = false; out["error"] = "usage";
             return true;
         }
