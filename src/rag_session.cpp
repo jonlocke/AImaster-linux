@@ -18,6 +18,8 @@
 #include <poppler-page-renderer.h>
 #include <tesseract/baseapi.h>
 
+#include "endpoint_utils.hpp"
+
 using json = nlohmann::json;
 namespace fs = std::filesystem;
 
@@ -173,7 +175,7 @@ bool RAGSessionManager::ensure_embedding_model_available() {
     if (!c) return false;
 
     std::string resp;
-    std::string url = ollama_url_ + "/api/tags";
+    std::string url = EndpointResolver::deriveTagsEndpoint(ollama_url_);
     curl_easy_setopt(c, CURLOPT_URL, url.c_str());
     curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, wr);
     curl_easy_setopt(c, CURLOPT_WRITEDATA, &resp);
@@ -203,7 +205,7 @@ std::vector<float> RAGSessionManager::embed(const std::string& t) {
     CURL* c = curl_easy_init();
     if (!c) return {};
 
-    std::string url = ollama_url_ + "/api/embeddings";
+    std::string url = EndpointResolver::embedEndpoint(ollama_url_);
     json payload = {{"model", embed_model_}, {"prompt", t}};
     std::string resp;
 
@@ -232,7 +234,7 @@ std::string RAGSessionManager::ollama_chat(const std::string& p) {
     CURL* c = curl_easy_init();
     if (!c) return {};
 
-    std::string url = ollama_url_ + "/api/chat";
+    std::string url = EndpointResolver::normalize(ollama_url_) + "/api/chat";
     json payload = {
         {"model", llm_model_},
         {"messages", json::array({
