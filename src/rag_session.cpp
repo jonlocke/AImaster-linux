@@ -351,12 +351,13 @@ double RAGSessionManager::cosine(const std::vector<float>& a, const std::vector<
 
 std::string RAGSessionManager::build_prompt(const std::string& ctx, const std::string& q) {
     std::ostringstream o;
-    o << "You are answering from retrieved document chunks. Use ONLY the context below. "
-      << "If the answer is not present in context, say exactly: 'I cannot find that in the provided document context.'\n\n"
+    o << "Answer using ONLY the provided context snippets. "
+      << "If the question asks for a summary/overview, provide a concise synthesis of the available snippets. "
+      << "If the answer is not present, say: I cannot find that in the provided document context.\n\n"
       << "Context:\n"
       << ctx
       << "\nQuestion:\n" << q
-      << "\n\nReturn a direct answer in 1-3 sentences and include short quotes or facts from the context.";
+      << "\n\nReturn 2-6 sentences and include concrete details from context where possible.";
     return o.str();
 }
 
