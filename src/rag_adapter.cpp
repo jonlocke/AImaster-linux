@@ -12,10 +12,21 @@ namespace fs = std::filesystem;
 
 static std::mutex g_mtx;
 static std::string g_last_error;
+static bool g_verbose = true;
 static RAGSessionManager g_mgr;
 
 const std::string& AIMaster_RAG_LastError(){ return g_last_error; }
-void AIMaster_RAG_SetVerbose(bool v){ std::lock_guard<std::mutex> L(g_mtx); g_mgr.setVerbose(v); }
+void AIMaster_RAG_SetVerbose(bool v){ std::lock_guard<std::mutex> L(g_mtx); g_verbose = v; g_mgr.setVerbose(v); }
+
+
+void AIMaster_RAG_ConfigureRemote(const std::string& ollama_url){
+    std::lock_guard<std::mutex> L(g_mtx);
+    if (ollama_url.empty()) return;
+    if (g_mgr.ollamaUrl() == ollama_url) return;
+
+    g_mgr = RAGSessionManager("chroma_cpp", ollama_url, "mxbai-embed-large", "deepseek-r1:latest");
+    g_mgr.setVerbose(g_verbose);
+}
 
 // -------- Minimal, safe code ingestion appended after PDF session creation --------
 

@@ -108,6 +108,15 @@ static std::vector<std::string> fetch_ollama_models(const std::string& chat_url,
 }
 
 
+
+static bool has_model_name(const std::vector<std::string>& models, const std::string& model) {
+    for (const auto& m : models) {
+        if (m == model) return true;
+        if (m.rfind(model + ":", 0) == 0) return true;
+    }
+    return false;
+}
+
 // Expand tilde in file paths
 std::string expandTilde(const std::string& path) {
     if (!path.empty() && path[0] == '~') {
@@ -178,6 +187,7 @@ int main() {
     }
     // After loadConfig("config.txt", config);
 setSerialWrapColumns(config.serial_wrap_cols);
+AIMaster_RAG_ConfigureRemote(config.ollama_url);
 // Ping Ollama server with 2s timeout (non-fatal)
     {
         long http_code = 0;
@@ -185,6 +195,21 @@ setSerialWrapColumns(config.serial_wrap_cols);
         if (!ok) {
             std::cout << "[Warning] Could not reach Ollama at " << config.ollama_url
                       << " within 2 seconds. Some commands may not work.\n";
+        }
+    }
+
+    {
+        std::string model_err;
+        auto models = fetch_ollama_models(config.ollama_url, model_err);
+        if (models.empty()) {
+            if (!model_err.empty()) {
+                std::cout << "[Warning] Unable to verify embedding model availability at startup: "
+                          << model_err << "\n";
+            }
+        } else if (!has_model_name(models, "mxbai-embed-large")) {
+            std::cout << "[Warning] Required RAG embedding model 'mxbai-embed-large' is not installed on Ollama host "
+                      << config.ollama_url
+                      << ". Install it on that host before RAG_INGEST (e.g. 'ollama pull mxbai-embed-large').\n";
         }
     }
 setSerialNewlinePolicy(config.serial_newline);  // NEW (CRLF/LFCR/LF/CR)
