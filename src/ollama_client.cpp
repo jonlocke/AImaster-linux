@@ -557,6 +557,7 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
             cmds["MODEL"] = "List or set Ollama model.";
             cmds["RAG_INGEST"] = "Ingest a folder into the RAG system.";
             cmds["RAG_SHOW"] = "Show the contents of the RAG ingestion.";
+            cmds["RAG_ASK"] = "Ask RAG: RAG_ASK [--k N] [--thr T] <question...> (falls back to top-k if best score > 0.0).";
             cmds["RAG_SESSION"] = "Display the session information.";
         }
         result["commands"] = cmds;
