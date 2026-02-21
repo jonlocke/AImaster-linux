@@ -187,7 +187,7 @@ int main() {
     }
     // After loadConfig("config.txt", config);
 setSerialWrapColumns(config.serial_wrap_cols);
-AIMaster_RAG_ConfigureRemote(config.ollama_url);
+AIMaster_RAG_ConfigureRemote(config.ollama_url, config.ollama_model);
 // Ping Ollama server with 2s timeout (non-fatal)
     {
         long http_code = 0;

@@ -365,7 +365,7 @@ void SerialINT_Start(AppConfig& config) {
 }
 
 void SerialINT_HandleLine(const std::string& line, AppConfig& config) {
-    AIMaster_RAG_ConfigureRemote(config.ollama_url);
+    AIMaster_RAG_ConfigureRemote(config.ollama_url, config.ollama_model);
     if (line == "/bye") {
         g_serial_int_active.store(false, std::memory_order_relaxed);
         route_output("[Returning to main prompt]", true);
@@ -408,7 +408,7 @@ static std::string trim(std::string s){ return rtrim(ltrim(s)); }
 // ================= Dispatcher =================
 Json::Value processCommand(const std::string& command, AppConfig& config) {
 
-    AIMaster_RAG_ConfigureRemote(config.ollama_url);
+    AIMaster_RAG_ConfigureRemote(config.ollama_url, config.ollama_model);
     diag_log("[processCommand] src=%d raw='%s'\n",
              (int)getCurrentCommandSource(), command.c_str());
     if (diagMode) std::fflush(stderr);

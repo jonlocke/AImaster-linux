@@ -324,11 +324,15 @@ double RAGSessionManager::cosine(const std::vector<float>& a, const std::vector<
 
 std::string RAGSessionManager::build_prompt(const std::string& ctx, const std::string& q) {
     std::ostringstream o;
-    o << "Answer the question based only on the context.\n\nContext:\n"
-      << ctx << "\n\nQuestion:\n" << q
-      << "\n\nAnswer concisely and accurately in three sentences or less.";
+    o << "You are answering from retrieved document chunks. Use ONLY the context below. "
+      << "If the answer is not present in context, say exactly: 'I cannot find that in the provided document context.'\n\n"
+      << "Context:\n"
+      << ctx
+      << "\nQuestion:\n" << q
+      << "\n\nReturn a direct answer in 1-3 sentences and include short quotes or facts from the context.";
     return o.str();
 }
+
 
 static std::unordered_set<std::string> token_set(const std::string& s) {
     std::unordered_set<std::string> out;
