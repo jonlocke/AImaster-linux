@@ -6,6 +6,8 @@
 #include <vector>
 #include <iostream>
 #include <iomanip>
+#include <algorithm>
+#include <cctype>
 
 static void tokenize(const std::string& line, std::vector<std::string>& toks) {
     std::istringstream iss(line);
@@ -13,12 +15,18 @@ static void tokenize(const std::string& line, std::vector<std::string>& toks) {
     while (iss >> t) toks.push_back(t);
 }
 
+static std::string upper(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+    return s;
+}
+
 bool HandleRAGConsoleCommand(const std::string& line, Json::Value& out) {
     std::vector<std::string> tokens;
     tokenize(line, tokens);
     if (tokens.empty()) return false;
 
-    const std::string& cmd = tokens[0];
+    const std::string cmd = upper(tokens[0]);
 
     // RAG_INGEST <folder>
     if (cmd == "RAG_INGEST") {
@@ -81,7 +89,8 @@ bool HandleRAGConsoleCommand(const std::string& line, Json::Value& out) {
 
     // RAG_SESSION <SET|SHOW|CLEAR> [sid]
     if (cmd == "RAG_SESSION") {
-        if (tokens.size()>=2 && tokens[1]=="SET") {
+        const std::string action = tokens.size() >= 2 ? upper(tokens[1]) : "";
+        if (action == "SET") {
             if (tokens.size()<3) {
                 std::cout << "Usage: RAG_SESSION SET <sid>\n";
                 out["ok"] = false; out["error"] = "usage";
@@ -90,11 +99,11 @@ bool HandleRAGConsoleCommand(const std::string& line, Json::Value& out) {
             rag_state::SetActiveSession(tokens[2]);
             std::cout << "RAG session set.\n";
             out["ok"] = true; out["session_id"] = tokens[2];
-        } else if (tokens.size()>=2 && tokens[1]=="SHOW") {
+        } else if (action == "SHOW") {
             auto sid = rag_state::GetActiveSession();
             std::cout << (sid.empty() ? "<none>" : sid) << "\n";
             out["ok"] = true; out["session_id"] = sid;
-        } else if (tokens.size()>=2 && tokens[1]=="CLEAR") {
+        } else if (action == "CLEAR") {
             rag_state::SetActiveSession("");
             std::cout << "RAG session cleared.\n";
             out["ok"] = true;
