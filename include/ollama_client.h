@@ -11,6 +11,9 @@ std::string modelPrompt(const AppConfig& cfg, const char* suffix);
 // Main command dispatcher (console & serial share this).
 Json::Value processCommand(const std::string& command, AppConfig& config);
 
+// True when DIAG mode is currently enabled.
+bool IsDiagnosticModeEnabled();
+
 // Serial interactive mode hooks used by main/serial listener.
 bool SerialINT_IsActive();
 void SerialINT_Start(AppConfig& config);
