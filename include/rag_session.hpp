@@ -18,6 +18,7 @@ public:
   // Public methods needed by adapter for code ingestion
   std::vector<float> embed(const std::string& text);
   std::string sessionDir(const std::string& sid) const;
+  const std::string& ollamaUrl() const { return ollama_url_; }
   void save_index(const SessionIndex& idx) const;
   std::optional<SessionIndex> load_index(const std::string& sid) const;
 
