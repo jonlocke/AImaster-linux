@@ -1,6 +1,7 @@
 chroma_cpp
 chroma_cpp/*
 testDocs/*
+config.txt
 
 # Prerequisites
 *.d

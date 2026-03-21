@@ -74,11 +74,14 @@ static size_t ocurl_write_to_string(void* contents, size_t size, size_t nmemb, v
     s->append((char*)contents, total);
     return total;
 }
+<<<<<<< HEAD
 static std::string oderive_tags_endpoint(const std::string& chat_url) {
     auto pos = chat_url.find("/api/");
     if (pos == std::string::npos) return chat_url;
     return chat_url.substr(0, pos) + "/api/tags";
 }
+=======
+>>>>>>> codex/add-openai-compatibility-adapter-to-aimaster-jt0i1p
 static std::vector<std::string> fetch_provider_models(const AppConfig& config, std::string& error) {
     std::vector<std::string> models;
     std::string url = deriveModelsUrl(config);
@@ -115,7 +118,6 @@ static std::vector<std::string> fetch_provider_models(const AppConfig& config, s
 // ---- Streaming support ----
 struct StreamData {
     std::string collected;
-    std::string raw_output;
     std::chrono::high_resolution_clock::time_point start_time;
     bool first_chunk_received = false;
 };
@@ -190,6 +192,7 @@ namespace {
     }
 }
 
+<<<<<<< HEAD
 static size_t StreamCallback(void* contents, size_t size, size_t nmemb, void* userp) {
     size_t totalSize = size * nmemb;
     std::string chunk((char*)contents, totalSize);
@@ -244,6 +247,8 @@ static void setCurlStreamingOptions(CURL* curl, struct curl_slist*& headers) {
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, StreamCallback);
 }
 
+=======
+>>>>>>> codex/add-openai-compatibility-adapter-to-aimaster-jt0i1p
 // ---- Send message to configured provider ----
 static bool sendMessageToOllama(const std::string& query,
                                 std::vector<Json::Value>& chatHistory,
