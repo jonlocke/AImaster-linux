@@ -37,7 +37,7 @@ struct AppConfig {
     bool tts_enabled = false;
     std::string tts_endpoint_url = "http://127.0.0.1:8092/speak";
     long tts_timeout_seconds = 10;
-    std::string tts_voice;
+    std::string tts_voice = "corie";
     std::string tts_speaker;
 
     // RAG retrieval defaults (used by ASK/INT when RAG is active)

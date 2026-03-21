@@ -31,6 +31,10 @@ std::string uppercase_copy(std::string s) {
     return s;
 }
 
+bool isSupportedVoice(const std::string& voice) {
+    return voice == "corie" || voice == "semaine" || voice == "southern_english_female";
+}
+
 std::string appendQueryParam(const std::string& url, const std::string& key, const std::string& value) {
     return url + (url.find('?') == std::string::npos ? "?" : "&") + key + "=" + value;
 }
@@ -230,6 +234,36 @@ bool applySpeakCommand(const std::string& command, AppConfig& config, SpeakComma
     return true;
 }
 
+
+VoiceCommandResult parseVoiceCommand(const std::string& command) {
+    VoiceCommandResult out;
+    std::string trimmed = trim_copy(command);
+    std::string upper = uppercase_copy(trimmed);
+    if (upper.rfind("/VOICE", 0) != 0) return out;
+    out.recognized = true;
+
+    std::istringstream iss(trimmed);
+    std::string verb, arg;
+    iss >> verb >> arg;
+    if (arg.empty()) {
+        out.message = "Usage: /voice corie|semaine|southern_english_female";
+        return out;
+    }
+    std::transform(arg.begin(), arg.end(), arg.begin(), [](unsigned char c){ return std::tolower(c); });
+    out.voice = arg;
+    out.valid = isSupportedVoice(arg);
+    if (out.valid) out.message = "[OK] Voice set to: " + arg;
+    else out.message = "Usage: /voice corie|semaine|southern_english_female";
+    return out;
+}
+
+bool applyVoiceCommand(const std::string& command, AppConfig& config, VoiceCommandResult& out) {
+    out = parseVoiceCommand(command);
+    if (!out.recognized) return false;
+    if (out.valid) config.tts_voice = out.voice;
+    return true;
+}
+
 Json::Value buildTTSRequestPayload(const std::string& text, const AppConfig& config) {
     Json::Value payload(Json::objectValue);
     payload["text"] = text;
@@ -247,7 +281,7 @@ Json::Value buildTTSRequestPayload(const std::string& text, const AppConfig& con
 std::string buildTTSRequestUrl(const AppConfig& config) {
     std::string url = config.tts_endpoint_url;
     url = appendQueryParam(url, "play", "0");
-    url = appendQueryParam(url, "return_audio", "1");
+    url = appendQueryParam(url, "stream_audio_chunks", "1");
     return url;
 }
 
@@ -286,6 +320,51 @@ bool decodeBase64AudioResponse(const std::string& response_body,
     }
     out.content_type = root.get("content_type", root.get("mime_type", "audio/wav")).asString();
     return decodeBase64(encoded, out.audio_bytes, error);
+}
+
+
+bool parseStreamedAudioChunks(const std::string& response_body,
+                              std::vector<std::vector<unsigned char>>& chunks,
+                              std::string& error) {
+    std::istringstream lines(response_body);
+    std::string line;
+    bool saw_done = false;
+    while (std::getline(lines, line)) {
+        line = trim_copy(line);
+        if (line.empty()) continue;
+
+        Json::CharReaderBuilder reader;
+        Json::Value root;
+        std::string errs;
+        std::istringstream ss(line);
+        if (!Json::parseFromStream(reader, ss, &root, &errs)) {
+            error = "invalid streamed JSON";
+            return false;
+        }
+
+        const std::string type = root.get("type", "").asString();
+        if (type == "audio_chunk") {
+            std::string encoded = root.get("audio_b64_wav", "").asString();
+            if (encoded.empty()) {
+                error = "missing audio_b64_wav field";
+                return false;
+            }
+            std::vector<unsigned char> bytes;
+            if (!decodeBase64(encoded, bytes, error)) return false;
+            chunks.push_back(std::move(bytes));
+        } else if (type == "error") {
+            error = root.get("detail", "stream error").asString();
+            return false;
+        } else if (type == "done") {
+            saw_done = true;
+        }
+    }
+
+    if (chunks.empty()) {
+        error = saw_done ? "no audio chunks returned" : "missing audio chunks";
+        return false;
+    }
+    return true;
 }
 
 bool maybeSpeakText(const std::string& text, const AppConfig& config) {
@@ -332,21 +411,31 @@ bool maybeSpeakText(const std::string& text, const AppConfig& config) {
         return false;
     }
 
-    TTSResponseAudio audio;
     std::string error;
     const bool looks_like_wav = response.size() >= 12 && response.compare(0, 4, "RIFF") == 0 && response.compare(8, 4, "WAVE") == 0;
-    if (content_type.rfind("audio/", 0) == 0 || content_type == "application/octet-stream" || looks_like_wav) {
-        audio.content_type = content_type.empty() ? "audio/wav" : content_type;
-        audio.audio_bytes.assign(response.begin(), response.end());
-    } else if (!decodeBase64AudioResponse(response, audio, error)) {
-        std::cerr << "[Warn] TTS response invalid: " << error << "\n";
-        return false;
+    std::vector<std::vector<unsigned char>> audio_chunks;
+    if (content_type == "application/x-ndjson" || response.find(""audio_b64_wav"") != std::string::npos) {
+        if (!parseStreamedAudioChunks(response, audio_chunks, error)) {
+            std::cerr << "[Warn] TTS response invalid: " << error << "\n";
+            return false;
+        }
+    } else if (content_type.rfind("audio/", 0) == 0 || content_type == "application/octet-stream" || looks_like_wav) {
+        audio_chunks.push_back(std::vector<unsigned char>(response.begin(), response.end()));
+    } else {
+        TTSResponseAudio audio;
+        if (!decodeBase64AudioResponse(response, audio, error)) {
+            std::cerr << "[Warn] TTS response invalid: " << error << "\n";
+            return false;
+        }
+        audio_chunks.push_back(std::move(audio.audio_bytes));
     }
 
     std::string backend_used;
-    if (!playAudioBytes(audio.audio_bytes, backend_used, error)) {
-        std::cerr << "[Warn] TTS playback failed: " << error << "\n";
-        return false;
+    for (const auto& chunk : audio_chunks) {
+        if (!playAudioBytes(chunk, backend_used, error)) {
+            std::cerr << "[Warn] TTS playback failed: " << error << "\n";
+            return false;
+        }
     }
 
     std::cerr << "[Info] TTS playback backend: " << backend_used << "\n";

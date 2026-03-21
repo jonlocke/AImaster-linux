@@ -40,6 +40,26 @@ static void test_speak_state_behavior() {
     assert(!cfg.tts_enabled);
 }
 
+
+static void test_voice_command() {
+    auto corie = parseVoiceCommand("/voice corie");
+    assert(corie.recognized);
+    assert(corie.valid);
+    assert(corie.voice == "corie");
+
+    AppConfig cfg;
+    VoiceCommandResult res;
+    bool handled = applyVoiceCommand("/voice semaine", cfg, res);
+    assert(handled);
+    assert(res.valid);
+    assert(cfg.tts_voice == "semaine");
+
+    handled = applyVoiceCommand("/voice nope", cfg, res);
+    assert(handled);
+    assert(!res.valid);
+    assert(cfg.tts_voice == "semaine");
+}
+
 static void test_build_payload_and_decode_success() {
     AppConfig cfg;
     cfg.tts_voice = "en-us";
@@ -51,7 +71,7 @@ static void test_build_payload_and_decode_success() {
     assert(payload["speaker"].asString() == "narrator");
 
     cfg.tts_endpoint_url = "http://127.0.0.1:8092/speak";
-    assert(buildTTSRequestUrl(cfg) == "http://127.0.0.1:8092/speak?play=0&return_audio=1");
+    assert(buildTTSRequestUrl(cfg) == "http://127.0.0.1:8092/speak?play=0&stream_audio_chunks=1");
 
     TTSResponseAudio audio;
     std::string err;
@@ -90,6 +110,7 @@ static void test_decode_failure_paths() {
 void run_tts_tests() {
     test_parse_speak_command();
     test_speak_state_behavior();
+    test_voice_command();
     test_build_payload_and_decode_success();
     test_decode_failure_paths();
     std::cout << "tts_tests passed\n";

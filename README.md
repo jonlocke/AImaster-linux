@@ -144,10 +144,11 @@ AImaster now supports an additive local `/speak` command:
 
 - `/speak on` enables text-to-speech playback for the final assistant reply.
 - `/speak off` disables text-to-speech playback.
+- `/voice corie`, `/voice semaine`, or `/voice southern_english_female` selects the TTS voice alias.
 - Normal console output is unchanged; speech is played in addition to the printed response.
 - `/speak` is handled locally and is never sent to the LLM as chat content.
 
-When speech is enabled, AImaster sends the final assistant text to the configured Quick-Piper-Endpoint `/speak` URL using the documented `play=0&return_audio=1` flow, prefers returned WAV audio bytes directly, and falls back to compatible JSON/base64 parsing if needed before attempting playback with the first available backend in this order:
+When speech is enabled, AImaster sends the final assistant text to the configured Quick-Piper-Endpoint `/speak` URL using the streamed base64 chunk flow `play=0&stream_audio_chunks=1`, decodes each `audio_b64_wav` NDJSON chunk, and plays the chunks in order before falling back to compatible raw WAV or JSON/base64 parsing when needed. Playback backends are tried in this order:
 
 1. `paplay`
 2. `aplay`
@@ -164,8 +165,8 @@ These config keys are supported in `config.txt` and `config-example.txt`:
 tts_enabled=false
 tts_endpoint_url=http://127.0.0.1:8092/speak
 tts_timeout_seconds=10
-#tts_voice=en-us
-#tts_speaker=narrator
+tts_voice=corie
+#tts_speaker=0
 ```
 
 Environment overrides are also supported:
@@ -176,7 +177,7 @@ Environment overrides are also supported:
 - `AIMASTER_TTS_VOICE`
 - `AIMASTER_TTS_SPEAKER`
 
-Request payloads follow the upstream examples by sending `text` (and `prompt` as a compatibility alias), plus optional `voice` and `speaker` values in the JSON body. The client appends `play=0&return_audio=1` to the configured `/speak` URL so the shim returns WAV audio bytes directly; for resilience it also accepts compatible JSON/base64 fields such as `audio`, `audio_base64`, `wav_base64`, `audio_data`, and nested `data.*` variants.
+Request payloads follow the upstream examples by sending `text` (and `prompt` as a compatibility alias), plus optional `voice` and `speaker` values in the JSON body. The client now prioritizes the upstream NDJSON stream example by appending `play=0&stream_audio_chunks=1` to the configured `/speak` URL and decoding each `audio_b64_wav` chunk. For resilience it still accepts direct WAV responses and compatible JSON/base64 fields such as `audio`, `audio_base64`, `wav_base64`, `audio_data`, and nested `data.*` variants.
 
 ### Troubleshooting audio
 
@@ -191,5 +192,5 @@ Request payloads follow the upstream examples by sending `text` (and `prompt` as
 
 - Verify `tts_endpoint_url` points to the running Quick-Piper endpoint.
 - Increase `tts_timeout_seconds` if synthesis is slow.
-- If needed, set `tts_voice` and `tts_speaker` to values accepted by your endpoint deployment.
+- Use `/voice corie`, `/voice semaine`, or `/voice southern_english_female` to switch aliases quickly, or set `tts_voice` directly in config.
 - If the endpoint is unavailable or returns invalid JSON, AImaster keeps the normal text reply and logs a warning instead of crashing.

@@ -11,3 +11,4 @@ RAG_SESSION,Display the session information.
 DELAY,Set the Chars per second (CPS) delay for responses.
  /speak on,Enable text-to-speech output for assistant replies.
 /speak off,Disable text-to-speech output.
+/voice corie|semaine|southern_english_female,Select the TTS voice alias.

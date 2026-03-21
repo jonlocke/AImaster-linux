@@ -313,6 +313,14 @@ void SerialINT_HandleLine(const std::string& line, AppConfig& config) {
         return;
     }
 
+    VoiceCommandResult voice;
+    if (applyVoiceCommand(line, config, voice)) {
+        if (voice.valid && saveConfig("config.txt", config)) voice.message += " (saved)";
+        route_output(voice.message, true);
+        route_output("-> ", false);
+        return;
+    }
+
     // Try RAG first (if active and enabled)
     std::string rag_answer;
     if (rag_int::TryRAGAnswer(line, rag_answer, /*k=*/config.rag_chunks, /*threshold=*/config.rag_threshold)) {
@@ -371,6 +379,15 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
         route_output(speak.message, true);
         result["status"] = (cmd_upper == "/SPEAK ON" || cmd_upper == "/SPEAK OFF") ? "success" : "error";
         result["tts_enabled"] = config.tts_enabled;
+        return result;
+    }
+
+    VoiceCommandResult voice;
+    if (applyVoiceCommand(command, config, voice)) {
+        if (voice.valid && saveConfig("config.txt", config)) voice.message += " (saved)";
+        route_output(voice.message, true);
+        result["status"] = voice.valid ? "success" : "error";
+        result["tts_voice"] = config.tts_voice;
         return result;
     }
 
@@ -532,6 +549,7 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
             cmds["RESET"] = "Clear chat history.";
             cmds["/speak on"] = "Enable text-to-speech output for assistant replies.";
             cmds["/speak off"] = "Disable text-to-speech output.";
+            cmds["/voice corie|semaine|southern_english_female"] = "Select the TTS voice alias.";
             cmds["CFG"] = "Show current configuration.";
             cmds["HELP"] = "List available commands.";
             cmds["MODEL"] = "List or set Ollama model.";
