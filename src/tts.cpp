@@ -250,7 +250,7 @@ Json::Value buildTTSRequestPayload(const std::string& text, const AppConfig& con
 std::string buildTTSRequestUrl(const AppConfig& config) {
     std::string url = config.tts_endpoint_url;
     url = appendQueryParam(url, "play", "0");
-    url = appendQueryParam(url, "return_audio", "1");
+    url = appendQueryParam(url, "stream_audio_chunks", "1");
     return url;
 }
 
@@ -311,6 +311,47 @@ std::vector<std::string> extractSpeakableChunks(std::string& pending_text, bool 
     return out;
 }
 
+
+static bool parseStreamedAudioChunks(const std::string& response_body,
+                                     std::vector<std::vector<unsigned char>>& audio_chunks,
+                                     std::string& error) {
+    std::istringstream lines(response_body);
+    std::string line;
+    while (std::getline(lines, line)) {
+        line = trim_copy(line);
+        if (line.empty()) continue;
+
+        Json::CharReaderBuilder reader;
+        Json::Value root;
+        std::string errs;
+        std::istringstream ss(line);
+        if (!Json::parseFromStream(reader, ss, &root, &errs)) {
+            error = "invalid streamed JSON";
+            return false;
+        }
+
+        const std::string type = root.get("type", "").asString();
+        if (type == "audio_chunk") {
+            std::string encoded = root.get("audio_b64_wav", "").asString();
+            if (encoded.empty()) {
+                error = "missing audio_b64_wav field";
+                return false;
+            }
+            std::vector<unsigned char> chunk;
+            if (!decodeBase64(encoded, chunk, error)) return false;
+            audio_chunks.push_back(std::move(chunk));
+        } else if (type == "error") {
+            error = root.get("detail", "stream error").asString();
+            return false;
+        }
+    }
+    if (audio_chunks.empty()) {
+        error = "missing audio chunks";
+        return false;
+    }
+    return true;
+}
+
 static bool speakTextNow(const std::string& text, const AppConfig& config) {
     if (!config.tts_enabled) return true;
     if (trim_copy(text).empty()) return true;
@@ -355,21 +396,31 @@ static bool speakTextNow(const std::string& text, const AppConfig& config) {
         return false;
     }
 
-    TTSResponseAudio audio;
     std::string error;
     const bool looks_like_wav = response.size() >= 12 && response.compare(0, 4, "RIFF") == 0 && response.compare(8, 4, "WAVE") == 0;
-    if (content_type.rfind("audio/", 0) == 0 || content_type == "application/octet-stream" || looks_like_wav) {
-        audio.content_type = content_type.empty() ? "audio/wav" : content_type;
-        audio.audio_bytes.assign(response.begin(), response.end());
-    } else if (!decodeBase64AudioResponse(response, audio, error)) {
-        std::cerr << "[Warn] TTS response invalid: " << error << "\n";
-        return false;
+    std::vector<std::vector<unsigned char>> audio_chunks;
+    if (content_type == "application/x-ndjson" || response.find("\"audio_b64_wav\"") != std::string::npos) {
+        if (!parseStreamedAudioChunks(response, audio_chunks, error)) {
+            std::cerr << "[Warn] TTS response invalid: " << error << "\n";
+            return false;
+        }
+    } else if (content_type.rfind("audio/", 0) == 0 || content_type == "application/octet-stream" || looks_like_wav) {
+        audio_chunks.push_back(std::vector<unsigned char>(response.begin(), response.end()));
+    } else {
+        TTSResponseAudio audio;
+        if (!decodeBase64AudioResponse(response, audio, error)) {
+            std::cerr << "[Warn] TTS response invalid: " << error << "\n";
+            return false;
+        }
+        audio_chunks.push_back(std::move(audio.audio_bytes));
     }
 
     std::string backend_used;
-    if (!playAudioBytes(audio.audio_bytes, backend_used, error)) {
-        std::cerr << "[Warn] TTS playback failed: " << error << "\n";
-        return false;
+    for (const auto& chunk : audio_chunks) {
+        if (!playAudioBytes(chunk, backend_used, error)) {
+            std::cerr << "[Warn] TTS playback failed: " << error << "\n";
+            return false;
+        }
     }
 
     std::cerr << "[Info] TTS playback backend: " << backend_used << "\n";

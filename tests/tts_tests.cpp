@@ -73,7 +73,7 @@ static void test_build_payload_and_decode_success() {
     assert(payload["speaker"].asString() == "narrator");
 
     cfg.tts_endpoint_url = "http://127.0.0.1:8092/speak";
-    assert(buildTTSRequestUrl(cfg) == "http://127.0.0.1:8092/speak?play=0&return_audio=1");
+    assert(buildTTSRequestUrl(cfg) == "http://127.0.0.1:8092/speak?play=0&stream_audio_chunks=1");
 
     TTSResponseAudio audio;
     std::string err;
