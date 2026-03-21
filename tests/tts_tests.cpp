@@ -43,22 +43,28 @@ static void test_speak_state_behavior() {
 
 
 static void test_extract_speakable_chunks() {
-    std::string pending = "Hel";
+    std::string pending = "Hello";
     auto chunks = extractSpeakableChunks(pending, false);
     assert(chunks.empty());
-    assert(pending == "Hel");
+    assert(pending == "Hello");
 
-    pending += "lo world ";
+    pending += " world. How are";
+    chunks = extractSpeakableChunks(pending, false);
+    assert(chunks.size() == 1);
+    assert(chunks[0] == "Hello world.");
+    assert(pending == " How are");
+
+    pending += " you? Great!";
     chunks = extractSpeakableChunks(pending, false);
     assert(chunks.size() == 2);
-    assert(chunks[0] == "Hello");
-    assert(chunks[1] == "world");
+    assert(chunks[0] == "How are you?");
+    assert(chunks[1] == "Great!");
     assert(pending.empty());
 
-    pending = "again";
+    pending = "Trailing fragment";
     chunks = extractSpeakableChunks(pending, true);
     assert(chunks.size() == 1);
-    assert(chunks[0] == "again");
+    assert(chunks[0] == "Trailing fragment");
     assert(pending.empty());
 }
 

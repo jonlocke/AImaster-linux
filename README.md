@@ -142,12 +142,12 @@ Execute `serial-passthru.bat` to pass the serial port from Windows to WSL, updat
 
 AImaster now supports an additive local `/speak` command:
 
-- `/speak on` enables streaming text-to-speech playback for assistant replies as words arrive.
+- `/speak on` enables streaming text-to-speech playback for assistant replies sentence by sentence as text arrives.
 - `/speak off` disables text-to-speech playback.
 - Normal console output is unchanged; speech is played in addition to the printed response.
 - `/speak` is handled locally and is never sent to the LLM as chat content.
 
-When speech is enabled, AImaster now streams the assistant response into a background TTS queue as the LLM text arrives. Completed words are sent to the configured Quick-Piper-Endpoint `/speak` URL and played incrementally, so audio can begin before the full reply is finished. The client uses the streamed `play=0&stream_audio_chunks=1` flow for incremental playback, decoding each returned `audio_b64_wav` chunk, and still falls back to compatible raw WAV or JSON/base64 parsing when needed before attempting playback with the first available backend in this order:
+When speech is enabled, AImaster now streams the assistant response into a background TTS queue as the LLM text arrives. Completed sentences are sent to the configured Quick-Piper-Endpoint `/speak` URL and played incrementally, so audio can begin before the full reply is finished without sounding as choppy as word-by-word playback. The client uses the streamed `play=0&stream_audio_chunks=1` flow for incremental playback, decoding each returned `audio_b64_wav` chunk, and still falls back to compatible raw WAV or JSON/base64 parsing when needed before attempting playback with the first available backend in this order:
 
 1. `paplay`
 2. `aplay`

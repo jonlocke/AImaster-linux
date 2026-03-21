@@ -295,19 +295,26 @@ bool decodeBase64AudioResponse(const std::string& response_body,
 
 std::vector<std::string> extractSpeakableChunks(std::string& pending_text, bool flush_all) {
     std::vector<std::string> out;
-    size_t i = 0;
-    while (i < pending_text.size()) {
-        while (i < pending_text.size() && std::isspace(static_cast<unsigned char>(pending_text[i]))) ++i;
-        if (i >= pending_text.size()) break;
-        const size_t start = i;
-        while (i < pending_text.size() && !std::isspace(static_cast<unsigned char>(pending_text[i]))) ++i;
-        if (i == pending_text.size() && !flush_all) {
-            pending_text.erase(0, start);
-            return out;
-        }
-        out.push_back(pending_text.substr(start, i - start));
+    size_t sentence_start = 0;
+    for (size_t i = 0; i < pending_text.size(); ++i) {
+        const char c = pending_text[i];
+        const bool boundary = (c == '.' || c == '!' || c == '?' || c == '\n');
+        if (!boundary) continue;
+
+        std::string chunk = trim_copy(pending_text.substr(sentence_start, i - sentence_start + 1));
+        if (!chunk.empty()) out.push_back(std::move(chunk));
+        sentence_start = i + 1;
     }
-    pending_text.clear();
+
+    if (sentence_start > 0) {
+        pending_text.erase(0, sentence_start);
+    }
+
+    if (flush_all) {
+        std::string tail = trim_copy(pending_text);
+        if (!tail.empty()) out.push_back(std::move(tail));
+        pending_text.clear();
+    }
     return out;
 }
 
