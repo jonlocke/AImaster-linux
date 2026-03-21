@@ -11,6 +11,7 @@ OBJS = \
   src/serial_handler.o \
   src/chat_provider.o \
   src/ollama_client.o \
+  src/tts.o \
   src/rag_session.o \
   src/rag_adapter.o \
   src/rag_int_bridge.o \
@@ -30,7 +31,7 @@ clean:
 	rm -f $(OBJS) $(TARGET)
 
 TEST_TARGET = chat_provider_tests
-TEST_OBJS = src/chat_provider.o src/config_loader.o tests/chat_provider_tests.o
+TEST_OBJS = src/chat_provider.o src/config_loader.o src/tts.o tests/chat_provider_tests.o tests/tts_tests.o
 
 $(TEST_TARGET): $(TEST_OBJS)
 	$(CXX) $(CXXFLAGS) -o $@ $(TEST_OBJS) -ljsoncpp -lcurl
