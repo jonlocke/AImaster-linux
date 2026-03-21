@@ -5,6 +5,7 @@
 #include "rag_console_commands.hpp"
 #include "rag_int_bridge.hpp"
 #include "utils.h"
+#include "chat_provider.hpp"
 
 #include <curl/curl.h>
 #include <algorithm>
@@ -28,7 +29,7 @@ static std::string toupper_copy(std::string s){
 
 // ---------- Prompt helper ----------
 std::string modelPrompt(const AppConfig& cfg, const char* suffix) {
-    const std::string name = cfg.ollama_model.empty() ? "model" : cfg.ollama_model;
+    const std::string name = effectiveModel(cfg).empty() ? "model" : effectiveModel(cfg);
     return name + suffix;
 }
 
@@ -36,13 +37,8 @@ std::string modelPrompt(const AppConfig& cfg, const char* suffix) {
 static size_t ocurl_discard_cb(void* contents, size_t size, size_t nmemb, void* userp) {
     return size * nmemb;
 }
-static std::string oc_derive_tags_endpoint(const std::string& chat_url) {
-    auto pos = chat_url.find("/api/");
-    if (pos == std::string::npos) return chat_url;
-    return chat_url.substr(0, pos) + "/api/tags";
-}
-static bool oc_check_ollama_connectivity(const std::string& chat_url, long timeout_seconds, long* http_code_out=nullptr) {
-    std::string url = oc_derive_tags_endpoint(chat_url);
+static bool oc_check_provider_connectivity(const AppConfig& config, long timeout_seconds, long* http_code_out=nullptr) {
+    std::string url = deriveModelsUrl(config);
     CURL* curl = curl_easy_init();
     if (!curl) return false;
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
@@ -51,6 +47,12 @@ static bool oc_check_ollama_connectivity(const std::string& chat_url, long timeo
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, ocurl_discard_cb);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeout_seconds);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, timeout_seconds);
+    struct curl_slist* headers = nullptr;
+    if (!config.api_key.empty()) headers = curl_slist_append(headers, (std::string("Authorization: Bearer ") + config.api_key).c_str());
+    if (!config.organization.empty()) headers = curl_slist_append(headers, (std::string("OpenAI-Organization: ") + config.organization).c_str());
+    if (!config.project.empty()) headers = curl_slist_append(headers, (std::string("OpenAI-Project: ") + config.project).c_str());
+    for (const auto& kv : config.extra_headers) headers = curl_slist_append(headers, (kv.first + ": " + kv.second).c_str());
+    if (headers) curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     CURLcode res = curl_easy_perform(curl);
     bool ok = false;
     if (res == CURLE_OK) {
@@ -59,6 +61,7 @@ static bool oc_check_ollama_connectivity(const std::string& chat_url, long timeo
         if (http_code_out) *http_code_out = code;
         ok = (code >= 200 && code < 500);
     }
+    if (headers) curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
     return ok;
 }
@@ -76,9 +79,9 @@ static std::string oderive_tags_endpoint(const std::string& chat_url) {
     if (pos == std::string::npos) return chat_url;
     return chat_url.substr(0, pos) + "/api/tags";
 }
-static std::vector<std::string> fetch_ollama_models(const std::string& chat_url, std::string& error) {
+static std::vector<std::string> fetch_provider_models(const AppConfig& config, std::string& error) {
     std::vector<std::string> models;
-    std::string url = oderive_tags_endpoint(chat_url);
+    std::string url = deriveModelsUrl(config);
 
     CURL* curl = curl_easy_init();
     if (!curl) { error = "curl init failed"; return models; }
@@ -89,35 +92,24 @@ static std::vector<std::string> fetch_ollama_models(const std::string& chat_url,
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, ocurl_write_to_string);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+    struct curl_slist* headers = nullptr;
+    if (!config.api_key.empty()) headers = curl_slist_append(headers, (std::string("Authorization: Bearer ") + config.api_key).c_str());
+    if (!config.organization.empty()) headers = curl_slist_append(headers, (std::string("OpenAI-Organization: ") + config.organization).c_str());
+    if (!config.project.empty()) headers = curl_slist_append(headers, (std::string("OpenAI-Project: ") + config.project).c_str());
+    for (const auto& kv : config.extra_headers) headers = curl_slist_append(headers, (kv.first + ": " + kv.second).c_str());
+    if (headers) curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
 
     CURLcode res = curl_easy_perform(curl);
     if (res != CURLE_OK) {
         error = std::string("curl error: ") + curl_easy_strerror(res);
+        if (headers) curl_slist_free_all(headers);
         curl_easy_cleanup(curl);
         return models;
     }
+    if (headers) curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
 
-    Json::CharReaderBuilder b;
-    Json::Value root;
-    std::string errs;
-    std::istringstream iss(response);
-    if (!Json::parseFromStream(b, iss, &root, &errs)) {
-        error = std::string("JSON parse error: ") + errs;
-        return models;
-    }
-    if (root.isObject() && root.isMember("models") && root["models"].isArray()) {
-        for (const auto& m : root["models"]) {
-            if (m.isObject() && m.isMember("name") && m["name"].isString()) {
-                models.push_back(m["name"].asString());
-            } else if (m.isObject() && m.isMember("model") && m["model"].isString()) {
-                models.push_back(m["model"].asString());
-            }
-        }
-    } else {
-        error = "unexpected response";
-    }
-    return models;
+    return parseModelListResponse(config, response, error);
 }
 
 // ---- Streaming support ----
@@ -252,77 +244,67 @@ static void setCurlStreamingOptions(CURL* curl, struct curl_slist*& headers) {
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, StreamCallback);
 }
 
-// ---- Send message to Ollama ----
+// ---- Send message to configured provider ----
 static bool sendMessageToOllama(const std::string& query,
                                 std::vector<Json::Value>& chatHistory,
                                 const AppConfig& config) {
    diag_log("[DIAG] sendMessage caller src=%d\n", (int)getCurrentCommandSource());
- // Add user message to history
     Json::Value msg;
     msg["role"] = "user";
     msg["content"] = query;
     chatHistory.push_back(msg);
 
-    CURL* curl = curl_easy_init();
-    if (!curl) return false;
-
-    // Build streaming payload
     StreamData streamData;
-    Json::Value payload;
-    payload["model"] = config.ollama_model;
-    payload["messages"] = Json::arrayValue;
-    for (auto& m : chatHistory) payload["messages"].append(m);
-    payload["stream"] = true;
-
-    Json::StreamWriterBuilder wbuilder;
-    std::string jsonPayload = Json::writeString(wbuilder, payload);
-
-    if (diagMode) {
-        std::cerr << "\n[DIAG URL] " << config.ollama_url << "\n";
-        std::cerr << "[DIAG PAYLOAD] " << jsonPayload << "\n";
-    }
-
-    // --- Route replies correctly during this call ---
-    // If the caller is SERIAL (INT), force serial while streaming; otherwise leave as-is.
-const CommandSource prev = getCurrentCommandSource();
-setCurrentCommandSource(prev);   // assert caller’s route for this thread
+    const CommandSource prev = getCurrentCommandSource();
+    setCurrentCommandSource(prev);
     route_output("[Thinking.....:-).......]", true);
-
-    // cURL setup
-    curl_easy_setopt(curl, CURLOPT_URL,        config.ollama_url.c_str());
-    curl_easy_setopt(curl, CURLOPT_POST,       1L);
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, jsonPayload.c_str());
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA,  &streamData);
-
-    struct curl_slist* headers = NULL;
     streamData.start_time = std::chrono::high_resolution_clock::now();
-    streamData.first_chunk_received = false;
-    setCurlStreamingOptions(curl, headers);
 
-    // Perform request (your write/stream callback should call route_output)
-    CURLcode res = curl_easy_perform(curl);
+    ChatProviderResult providerResult;
+    const bool ok = executeProviderChat(
+        config,
+        chatHistory,
+        true,
+        [&](const std::string& text) {
+            if (!streamData.first_chunk_received) {
+                streamData.first_chunk_received = true;
+                auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::high_resolution_clock::now() - streamData.start_time
+                ).count();
+                route_output(std::string("[Response ") + std::to_string(elapsed) + "ms]", true);
+            }
+            route_output(text);
+            if (!serial_available) {
+                std::ofstream log("log.txt", std::ios::app);
+                if (log.is_open()) { log << text; log.flush(); }
+            }
+            streamData.collected += text;
+        },
+        [&](const std::string& line) {
+            diag_log("%s\n", line.c_str());
+        },
+        providerResult
+    );
 
-    // Cleanup curl
-    curl_slist_free_all(headers);
-    curl_easy_cleanup(curl);
-
-    // Finish line after streaming tokens
     route_output("", true);
-setCurrentCommandSource(prev);
+    setCurrentCommandSource(prev);
 
-    // Determine success and update chat history
-    const bool ok = (res == CURLE_OK && !streamData.collected.empty());
-    if (ok) {
-        Json::Value reply;
-        reply["role"] = "assistant";
-        reply["content"] = streamData.collected;
-        chatHistory.push_back(reply);
-        saveCodeBlocks(streamData.collected);
+    if (!ok) {
+        route_output(std::string("[Error] ") + providerResult.error_message, true);
+        if (providerResult.stream_interrupted) route_output("[Warning] Upstream stream ended early; partial output may be incomplete.", true);
+        chatHistory.pop_back();
+        return false;
     }
 
-    return ok;
+    Json::Value reply = providerResult.assistant_message;
+    if (!reply.isObject()) reply = Json::Value(Json::objectValue);
+    reply["role"] = reply.get("role", "assistant");
+    reply["content"] = providerResult.assistant_content;
+    if (!providerResult.usage.isNull()) reply["usage"] = providerResult.usage;
+    chatHistory.push_back(reply);
+    saveCodeBlocks(providerResult.assistant_content);
+    return true;
 }
-
 
 
 // ================= Serial INT state =================
@@ -427,12 +409,12 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
     if (!g_oc_ping_done) {
         g_oc_ping_done = true;
         long http_code = 0;
-        bool ok = oc_check_ollama_connectivity(config.ollama_url, config.ollama_timeout_seconds, &http_code);
+        bool ok = oc_check_provider_connectivity(config, effectiveTimeoutSeconds(config), &http_code);
         if (!ok) {
-            route_output(std::string("[Warning] Could not reach Ollama at ") + config.ollama_url +
-                         " within " + std::to_string(config.ollama_timeout_seconds) + " seconds. Some commands may not work.", true);
+            route_output(std::string("[Warning] Could not reach provider at ") + effectiveChatUrl(config) +
+                         " within " + std::to_string(effectiveTimeoutSeconds(config)) + " seconds. Some commands may not work.", true);
         } else {
-            route_output(std::string("[Info] Ollama reachable (HTTP ") + std::to_string(http_code) + ")", true);
+            route_output(std::string("[Info] Provider reachable (HTTP ") + std::to_string(http_code) + ")", true);
         }
     }
 
@@ -517,6 +499,10 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
         result["status"] = "success";
         result["serial_port"] = config.serial_port;
         result["baudrate"] = config.baudrate;
+        result["provider_type"] = effectiveProviderType(config);
+        result["api_base"] = effectiveApiBase(config);
+        result["model"] = effectiveModel(config);
+        result["timeout"] = Json::Value(static_cast<Json::UInt64>(effectiveTimeoutSeconds(config)));
         result["ollama_url"] = config.ollama_url;
         result["ollama_model"] = config.ollama_model;
         result["ollama_timeout_seconds"] = Json::Value(static_cast<Json::UInt64>(config.ollama_timeout_seconds));
@@ -525,9 +511,11 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
         route_output("Current configuration:", true);
         route_output(std::string("\tSerial port: ") + config.serial_port, true);
         route_output(std::string("\tBaudrate: ") + std::to_string(config.baudrate), true);
-        route_output(std::string("\tOllama URL: ") + config.ollama_url, true);
-        route_output(std::string("\tModel: ") + config.ollama_model, true);
-        route_output(std::string("\tOllama timeout (s): ") + std::to_string(config.ollama_timeout_seconds), true);
+        route_output(std::string("\tProvider type: ") + effectiveProviderType(config), true);
+        route_output(std::string("\tAPI base: ") + effectiveApiBase(config), true);
+        route_output(std::string("\tModel: ") + effectiveModel(config), true);
+        route_output(std::string("\tTimeout (s): ") + std::to_string(effectiveTimeoutSeconds(config)), true);
+        route_output(std::string("\tLegacy Ollama URL: ") + config.ollama_url, true);
         route_output(std::string("\tRAG chunks (ASK/INT): ") + std::to_string(config.rag_chunks), true);
         route_output(std::string("\tRAG threshold (ASK/INT): ") + std::to_string(config.rag_threshold), true);
         route_output(std::string("\tChar delay: ") + std::to_string(config.serial_delay_ms), true);
@@ -594,7 +582,7 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
         }
 
         std::string err;
-        auto models = fetch_ollama_models(config.ollama_url, err);
+        auto models = fetch_provider_models(config, err);
         if (!err.empty()) {
             route_output(std::string("[Error] ") + err, true);
             result["status"] = "error";
@@ -608,7 +596,7 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
             } else {
                 route_output("Available models:", true);
                 for (size_t i = 0; i < models.size(); ++i) {
-                    bool isCurrent = (models[i] == config.ollama_model);
+                    bool isCurrent = (models[i] == effectiveModel(config));
                     std::string line = "  [" + std::to_string(i+1) + "] " + models[i];
                     if (isCurrent) line += "  (current)";
                     route_output(line, true);
@@ -641,13 +629,14 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
         }
 
         config.ollama_model = chosen;
+        config.model = chosen;
         if (saveConfig("config.txt", config)) {
-            route_output(std::string("[OK] Model set to: ") + config.ollama_model + " (saved)", true);
+            route_output(std::string("[OK] Model set to: ") + effectiveModel(config) + " (saved)", true);
         } else {
-            route_output(std::string("[OK] Model set to: ") + config.ollama_model + " (save failed)", true);
+            route_output(std::string("[OK] Model set to: ") + effectiveModel(config) + " (save failed)", true);
         }
         result["status"] = "ok";
-        result["model"] = config.ollama_model;
+        result["model"] = effectiveModel(config);
         return result;
     }
     // ===== DIAG =====

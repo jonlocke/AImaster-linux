@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cctype>
 #include <iostream>
+#include <vector>
 
 static inline void rtrim(std::string& s) { while (!s.empty() && std::isspace((unsigned char)s.back())) s.pop_back(); }
 static inline void ltrim(std::string& s) { size_t i=0; while (i<s.size() && std::isspace((unsigned char)s[i])) ++i; if (i) s.erase(0,i); }
@@ -21,6 +22,14 @@ static bool parse_long(const std::string& s, long& out) {
 static bool parse_double(const std::string& s, double& out) {
     try { size_t idx=0; double v=std::stod(s,&idx); if (idx!=s.size()) return false; out=v; return true; }
     catch(...) { return false; }
+}
+
+static void parse_extra_header(const std::string& input, std::map<std::string,std::string>& out) {
+    auto pos = input.find(':');
+    if (pos == std::string::npos) return;
+    std::string key = trim_copy(input.substr(0, pos));
+    std::string value = trim_copy(input.substr(pos + 1));
+    if (!key.empty()) out[key] = value;
 }
 
 static void load_commands_csv(const std::string& path, std::map<std::string,std::string>& out_map) {
@@ -68,6 +77,17 @@ bool loadConfig(const std::string& path, AppConfig& out) {
         else if (key == "ollama_url")  out.ollama_url = val;
         else if (key == "ollama_model") out.ollama_model = val;
         else if (key == "ollama_timeout_seconds") { long v; if (parse_long(val, v) && v>=0) out.ollama_timeout_seconds = v; }
+        else if (key == "provider_type") out.provider_type = val;
+        else if (key == "api_base") out.api_base = val;
+        else if (key == "api_key") out.api_key = val;
+        else if (key == "model") out.model = val;
+        else if (key == "timeout") { long v; if (parse_long(val, v) && v>=0) out.timeout = v; }
+        else if (key == "organization") out.organization = val;
+        else if (key == "project") out.project = val;
+        else if (key == "temperature") { double v; if (parse_double(val, v)) out.temperature = v; }
+        else if (key == "num_predict") { int v; if (parse_int(val, v) && v>0) out.num_predict = v; }
+        else if (key == "format") out.format = val;
+        else if (key == "extra_header") parse_extra_header(val, out.extra_headers);
         else if (key == "rag_chunks") { int v; if (parse_int(val, v) && v > 0) out.rag_chunks = v; }
         else if (key == "rag_threshold") { double v; if (parse_double(val, v) && v >= 0.0) out.rag_threshold = v; }
         else if (key == "commands_csv") { out.commands_csv_path = val; load_commands_csv(val, out.commands); }
@@ -97,6 +117,17 @@ bool saveConfig(const std::string& path, const AppConfig& cfg) {
     out << "ollama_url=" << cfg.ollama_url << "\n";
     out << "ollama_model=" << cfg.ollama_model << "\n";
     out << "ollama_timeout_seconds=" << cfg.ollama_timeout_seconds << "\n";
+    out << "provider_type=" << cfg.provider_type << "\n";
+    if (!cfg.api_base.empty()) out << "api_base=" << cfg.api_base << "\n";
+    if (!cfg.api_key.empty()) out << "api_key=" << cfg.api_key << "\n";
+    if (!cfg.model.empty()) out << "model=" << cfg.model << "\n";
+    if (cfg.timeout > 0) out << "timeout=" << cfg.timeout << "\n";
+    if (!cfg.organization.empty()) out << "organization=" << cfg.organization << "\n";
+    if (!cfg.project.empty()) out << "project=" << cfg.project << "\n";
+    if (cfg.temperature >= 0.0) out << "temperature=" << cfg.temperature << "\n";
+    if (cfg.num_predict > 0) out << "num_predict=" << cfg.num_predict << "\n";
+    if (!cfg.format.empty()) out << "format=" << cfg.format << "\n";
+    for (const auto& kv : cfg.extra_headers) out << "extra_header=" << kv.first << ": " << kv.second << "\n";
     out << "rag_chunks=" << cfg.rag_chunks << "\n";
     out << "rag_threshold=" << cfg.rag_threshold << "\n";
     out << "serial_wrap_cols=" << cfg.serial_wrap_cols << "\n";

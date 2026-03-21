@@ -1,12 +1,24 @@
-# AImaster configuration (key=value)
-serial_port=/dev/ttyS1
+serial_port=/dev/ttyUSB0
 baudrate=2400
-serial_delay_ms=65
-serial_newline=CR
+serial_delay_ms=50
+serial_newline=CRLF
+serial_wrap_cols=80
+
+provider_type=ollama_native
 ollama_url=http://192.168.1.154:11434/api/chat
 ollama_model=qwen3:4b-16k
 ollama_timeout_seconds=2
+
+# Optional provider-agnostic / OpenAI-compatible overrides
+# api_base=http://localhost:4000
+# api_key=sk-example
+# model=gpt-4o-mini
+# timeout=30
+# temperature=0.2
+# num_predict=512
+# format=json
+# extra_header=X-Client: AImaster
+
 rag_chunks=25
 rag_threshold=0.2
-serial_wrap_cols=79
 commands_csv=cmds.csv

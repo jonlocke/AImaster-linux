@@ -3,6 +3,7 @@
 
 #include <string>
 #include <map>
+#include <json/json.h>
 
 struct AppConfig {
     // Serial
@@ -13,10 +14,24 @@ struct AppConfig {
     int serial_delay_ms = 50;
     std::string serial_newline = "CRLF"; // NEW: CRLF (default), LFCR, LF, CR
 
-    // Ollama
+    // Ollama / provider compatibility
     std::string ollama_url = "http://localhost:11434";
     std::string ollama_model = "gemma3:4b";
     long ollama_timeout_seconds = 5;
+
+    std::string provider_type = "ollama_native";
+    std::string api_base;
+    std::string api_key;
+    std::string model;
+    long timeout = 0;
+    std::map<std::string, std::string> extra_headers;
+    std::string organization;
+    std::string project;
+    double temperature = -1.0;
+    int num_predict = -1;
+    std::string format;
+    Json::Value tools;
+    Json::Value tool_choice;
 
     // RAG retrieval defaults (used by ASK/INT when RAG is active)
     int rag_chunks = 25;
