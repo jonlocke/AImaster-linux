@@ -10,6 +10,7 @@
 #include "serial_handler.h"
 #include "command_exec.h"
 #include "ollama_client.h"
+#include "chat_provider.hpp"
 #include "utils.h"
 #include <jsoncpp/json/json.h>
 #include <curl/curl.h>
@@ -191,16 +192,16 @@ AIMaster_RAG_ConfigureRemote(config.ollama_url, config.ollama_model);
 // Ping Ollama server with 2s timeout (non-fatal)
     {
         long http_code = 0;
-        bool ok = check_ollama_connectivity(config.ollama_url, 2, &http_code);
+        bool ok = check_ollama_connectivity(effectiveApiBase(config), 2, &http_code);
         if (!ok) {
-            std::cout << "[Warning] Could not reach Ollama at " << config.ollama_url
+            std::cout << "[Warning] Could not reach provider at " << effectiveChatUrl(config)
                       << " within 2 seconds. Some commands may not work.\n";
         }
     }
 
-    {
+    if (effectiveProviderType(config) == "ollama_native") {
         std::string model_err;
-        auto models = fetch_ollama_models(config.ollama_url, model_err);
+        auto models = fetch_ollama_models(effectiveApiBase(config), model_err);
         if (models.empty()) {
             if (!model_err.empty()) {
                 std::cout << "[Warning] Unable to verify embedding model availability at startup: "
@@ -258,7 +259,7 @@ startSerialListener([&](const std::string& line) {
         } else if (SerialINT_IsActive()) {
             prompt = "-> ";
         } else {
-            prompt = "[38;2;255;239;184m" + config.ollama_model + "> [0m";
+            prompt = "[38;2;255;239;184m" + effectiveModel(config) + "> [0m";
         }
 
         char* input = readline(prompt.c_str());
