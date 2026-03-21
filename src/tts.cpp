@@ -229,8 +229,16 @@ bool applySpeakCommand(const std::string& command, AppConfig& config, SpeakComma
 Json::Value buildTTSRequestPayload(const std::string& text, const AppConfig& config) {
     Json::Value payload(Json::objectValue);
     payload["text"] = text;
-    if (!config.tts_voice.empty()) payload["voice"] = config.tts_voice;
-    if (!config.tts_speaker.empty()) payload["speaker"] = config.tts_speaker;
+    payload["return_type"] = "base64";
+    payload["format"] = "wav";
+    payload["response_format"] = "wav";
+    if (!config.tts_voice.empty()) {
+        payload["voice"] = config.tts_voice;
+    }
+    if (!config.tts_speaker.empty()) {
+        payload["speaker"] = config.tts_speaker;
+        payload["speaker_id"] = config.tts_speaker;
+    }
     return payload;
 }
 
@@ -245,19 +253,29 @@ bool decodeBase64AudioResponse(const std::string& response_body,
         error = "invalid JSON";
         return false;
     }
-    const char* fields[] = {"audio", "audio_base64", "wav_base64"};
-    std::string encoded;
-    for (const char* field : fields) {
-        if (root.isMember(field) && root[field].isString()) {
-            encoded = root[field].asString();
-            break;
+
+    auto extractAudio = [](const Json::Value& node) -> std::string {
+        const char* fields[] = {"audio", "audio_base64", "wav_base64", "audio_data", "data"};
+        for (const char* field : fields) {
+            if (!node.isObject() || !node.isMember(field)) continue;
+            const Json::Value& value = node[field];
+            if (std::string(field) != "data" && value.isString()) return value.asString();
+            if (value.isObject()) {
+                const char* nested_fields[] = {"audio", "audio_base64", "wav_base64", "audio_data"};
+                for (const char* nested : nested_fields) {
+                    if (value.isMember(nested) && value[nested].isString()) return value[nested].asString();
+                }
+            }
         }
-    }
+        return std::string();
+    };
+
+    std::string encoded = extractAudio(root);
     if (encoded.empty()) {
         error = "missing audio field";
         return false;
     }
-    out.content_type = root.get("content_type", "audio/wav").asString();
+    out.content_type = root.get("content_type", root.get("mime_type", "audio/wav")).asString();
     return decodeBase64(encoded, out.audio_bytes, error);
 }
 

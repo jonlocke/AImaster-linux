@@ -46,8 +46,12 @@ static void test_build_payload_and_decode_success() {
     cfg.tts_speaker = "narrator";
     Json::Value payload = buildTTSRequestPayload("hello", cfg);
     assert(payload["text"].asString() == "hello");
+    assert(payload["return_type"].asString() == "base64");
+    assert(payload["format"].asString() == "wav");
+    assert(payload["response_format"].asString() == "wav");
     assert(payload["voice"].asString() == "en-us");
     assert(payload["speaker"].asString() == "narrator");
+    assert(payload["speaker_id"].asString() == "narrator");
 
     TTSResponseAudio audio;
     std::string err;
@@ -71,6 +75,11 @@ static void test_decode_failure_paths() {
     ok = decodeBase64AudioResponse(R"({"message":"missing"})", audio, err);
     assert(!ok);
     assert(err == "missing audio field");
+
+    err.clear();
+    ok = decodeBase64AudioResponse(R"({"data":{"audio_data":"aGVsbG8="}})", audio, err);
+    assert(ok);
+    assert(std::string(audio.audio_bytes.begin(), audio.audio_bytes.end()) == "hello");
 
     err.clear();
     ok = decodeBase64AudioResponse(R"({"audio":"%%%"})", audio, err);

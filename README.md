@@ -176,7 +176,7 @@ Environment overrides are also supported:
 - `AIMASTER_TTS_VOICE`
 - `AIMASTER_TTS_SPEAKER`
 
-Request payloads are sent as JSON with `text`, plus optional `voice` and `speaker` fields when configured. Response parsing accepts a base64 audio string from `audio`, `audio_base64`, or `wav_base64`.
+Request payloads are sent as JSON with `text`, `return_type=base64`, `format=wav`, and `response_format=wav`, plus optional `voice`, `speaker`, and `speaker_id` fields when configured. Response parsing accepts base64 audio from `audio`, `audio_base64`, `wav_base64`, `audio_data`, and nested `data.*` variants.
 
 ### Troubleshooting audio
 
