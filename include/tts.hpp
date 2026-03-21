@@ -17,17 +17,8 @@ struct TTSResponseAudio {
     std::string content_type;
 };
 
-struct VoiceCommandResult {
-    bool recognized = false;
-    bool valid = false;
-    std::string voice;
-    std::string message;
-};
-
 SpeakCommandResult parseSpeakCommand(const std::string& command);
-VoiceCommandResult parseVoiceCommand(const std::string& command);
 bool applySpeakCommand(const std::string& command, AppConfig& config, SpeakCommandResult& out);
-bool applyVoiceCommand(const std::string& command, AppConfig& config, VoiceCommandResult& out);
 Json::Value buildTTSRequestPayload(const std::string& text, const AppConfig& config);
 std::string buildTTSRequestUrl(const AppConfig& config);
 bool decodeBase64AudioResponse(const std::string& response_body,

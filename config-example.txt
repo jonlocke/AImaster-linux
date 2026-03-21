@@ -28,5 +28,5 @@ commands_csv=cmds.csv
 tts_enabled=false
 tts_endpoint_url=http://127.0.0.1:8092/speak
 tts_timeout_seconds=10
-tts_voice=corie
+#tts_voice=en-us
 #tts_speaker=narrator
