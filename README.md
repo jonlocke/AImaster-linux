@@ -149,9 +149,9 @@ AImaster now supports an additive local `/speak` command:
 
 When speech is enabled, AImaster sends the final assistant text to the configured Quick-Piper-Endpoint `/speak` URL using the documented `play=0&return_audio=1` flow, prefers returned WAV audio bytes directly, and falls back to compatible JSON/base64 parsing if needed before attempting playback with the first available backend in this order:
 
-1. `ffplay`
-2. `paplay`
-3. `aplay`
+1. `paplay`
+2. `aplay`
+3. `ffplay`
 
 If speech synthesis, decoding, or playback fails, AImaster logs a concise warning and continues without interrupting the normal text flow.
 
@@ -183,7 +183,7 @@ Request payloads follow the upstream examples by sending `text` (and `prompt` as
 #### No audio heard
 
 - Confirm `/speak on` is enabled.
-- Confirm one of `ffplay`, `paplay`, or `aplay` is installed and available on `PATH`.
+- Confirm one of `paplay`, `aplay`, or `ffplay` is installed and available on `PATH`.
 - Check stderr for the selected playback backend or warning message.
 - Verify the endpoint returns playable WAV/base64 content.
 

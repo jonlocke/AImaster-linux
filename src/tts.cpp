@@ -171,13 +171,13 @@ bool playAudioBytes(const std::vector<unsigned char>& audio, std::string& backen
 
     std::vector<Backend> backends;
     std::string exe;
-    if (findExecutable("ffplay", exe)) backends.push_back({"ffplay", {exe, "-nodisp", "-autoexit", "-loglevel", "error", path}});
     if (findExecutable("paplay", exe)) backends.push_back({"paplay", {exe, path}});
-    if (findExecutable("aplay", exe)) backends.push_back({"aplay", {exe, path}});
+    if (findExecutable("aplay", exe)) backends.push_back({"aplay", {exe, "-q", path}});
+    if (findExecutable("ffplay", exe)) backends.push_back({"ffplay", {exe, "-nodisp", "-autoexit", "-loglevel", "error", path}});
 
     if (backends.empty()) {
         ::unlink(path.c_str());
-        error = "no playback backend found (tried ffplay, paplay, aplay)";
+        error = "no playback backend found (tried paplay, aplay, ffplay)";
         return false;
     }
 
@@ -334,7 +334,8 @@ bool maybeSpeakText(const std::string& text, const AppConfig& config) {
 
     TTSResponseAudio audio;
     std::string error;
-    if (content_type.rfind("audio/", 0) == 0 || content_type == "application/octet-stream") {
+    const bool looks_like_wav = response.size() >= 12 && response.compare(0, 4, "RIFF") == 0 && response.compare(8, 4, "WAVE") == 0;
+    if (content_type.rfind("audio/", 0) == 0 || content_type == "application/octet-stream" || looks_like_wav) {
         audio.content_type = content_type.empty() ? "audio/wav" : content_type;
         audio.audio_bytes.assign(response.begin(), response.end());
     } else if (!decodeBase64AudioResponse(response, audio, error)) {
