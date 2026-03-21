@@ -33,6 +33,13 @@ struct AppConfig {
     Json::Value tools;
     Json::Value tool_choice;
 
+    // Text-to-speech
+    bool tts_enabled = false;
+    std::string tts_endpoint_url = "http://127.0.0.1:5000/tts";
+    long tts_timeout_seconds = 10;
+    std::string tts_voice;
+    std::string tts_speaker;
+
     // RAG retrieval defaults (used by ASK/INT when RAG is active)
     int rag_chunks = 25;
     double rag_threshold = 0.2;

@@ -23,3 +23,10 @@ extra_header=X-Client: AImaster
 rag_chunks=25
 rag_threshold=0.2
 commands_csv=cmds.csv
+
+# Text-to-speech (disabled by default)
+tts_enabled=false
+tts_endpoint_url=http://127.0.0.1:5000/tts
+tts_timeout_seconds=10
+#tts_voice=en-us
+#tts_speaker=narrator

@@ -1,3 +1,5 @@
+void run_tts_tests();
+
 #include "chat_provider.hpp"
 #include "config_loader.h"
 
@@ -90,6 +92,7 @@ int main() {
     test_ollama_payload_mapping();
     test_model_list_parsing();
     test_config_loader_fallback();
+    run_tts_tests();
     std::cout << "chat_provider_tests passed\n";
     return 0;
 }

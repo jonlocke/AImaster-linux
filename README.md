@@ -137,3 +137,59 @@ To switch to an OpenAI-compatible backend:
 Type `MODEL` to fetch available models from your configured upstream and interactively select one. The choice is persisted to `config.txt`.
 
 Execute `serial-passthru.bat` to pass the serial port from Windows to WSL, updating the batch file for your USB serial adapter IDs.
+
+## `/speak` text-to-speech
+
+AImaster now supports an additive local `/speak` command:
+
+- `/speak on` enables text-to-speech playback for the final assistant reply.
+- `/speak off` disables text-to-speech playback.
+- Normal console output is unchanged; speech is played in addition to the printed response.
+- `/speak` is handled locally and is never sent to the LLM as chat content.
+
+When speech is enabled, AImaster sends the final assistant text to the configured Quick-Piper-style HTTP endpoint, expects JSON containing base64 audio, decodes it, writes a temporary WAV file, and attempts playback using the first available backend in this order:
+
+1. `ffplay`
+2. `paplay`
+3. `aplay`
+
+If speech synthesis, decoding, or playback fails, AImaster logs a concise warning and continues without interrupting the normal text flow.
+
+### TTS configuration
+
+These config keys are supported in `config.txt` and `config-example.txt`:
+
+```ini
+# Text-to-speech (disabled by default)
+tts_enabled=false
+tts_endpoint_url=http://127.0.0.1:5000/tts
+tts_timeout_seconds=10
+#tts_voice=en-us
+#tts_speaker=narrator
+```
+
+Environment overrides are also supported:
+
+- `AIMASTER_TTS_ENABLED`
+- `AIMASTER_TTS_ENDPOINT`
+- `AIMASTER_TTS_TIMEOUT_SECONDS`
+- `AIMASTER_TTS_VOICE`
+- `AIMASTER_TTS_SPEAKER`
+
+Request payloads are sent as JSON with `text`, plus optional `voice` and `speaker` fields when configured. Response parsing accepts a base64 audio string from `audio`, `audio_base64`, or `wav_base64`.
+
+### Troubleshooting audio
+
+#### No audio heard
+
+- Confirm `/speak on` is enabled.
+- Confirm one of `ffplay`, `paplay`, or `aplay` is installed and available on `PATH`.
+- Check stderr for the selected playback backend or warning message.
+- Verify the endpoint returns playable WAV/base64 content.
+
+#### Endpoint connectivity
+
+- Verify `tts_endpoint_url` points to the running Quick-Piper endpoint.
+- Increase `tts_timeout_seconds` if synthesis is slow.
+- If needed, set `tts_voice` and `tts_speaker` to values accepted by your endpoint deployment.
+- If the endpoint is unavailable or returns invalid JSON, AImaster keeps the normal text reply and logs a warning instead of crashing.
