@@ -46,12 +46,12 @@ static void test_build_payload_and_decode_success() {
     cfg.tts_speaker = "narrator";
     Json::Value payload = buildTTSRequestPayload("hello", cfg);
     assert(payload["text"].asString() == "hello");
-    assert(payload["return_type"].asString() == "base64");
-    assert(payload["format"].asString() == "wav");
-    assert(payload["response_format"].asString() == "wav");
+    assert(payload["prompt"].asString() == "hello");
     assert(payload["voice"].asString() == "en-us");
     assert(payload["speaker"].asString() == "narrator");
-    assert(payload["speaker_id"].asString() == "narrator");
+
+    cfg.tts_endpoint_url = "http://127.0.0.1:8092/speak";
+    assert(buildTTSRequestUrl(cfg) == "http://127.0.0.1:8092/speak?play=0&return_audio=1");
 
     TTSResponseAudio audio;
     std::string err;

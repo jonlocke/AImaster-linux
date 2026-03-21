@@ -31,6 +31,10 @@ std::string uppercase_copy(std::string s) {
     return s;
 }
 
+std::string appendQueryParam(const std::string& url, const std::string& key, const std::string& value) {
+    return url + (url.find('?') == std::string::npos ? "?" : "&") + key + "=" + value;
+}
+
 bool findExecutable(const std::string& name, std::string& out_path) {
     const char* path_env = std::getenv("PATH");
     if (!path_env) return false;
@@ -229,17 +233,22 @@ bool applySpeakCommand(const std::string& command, AppConfig& config, SpeakComma
 Json::Value buildTTSRequestPayload(const std::string& text, const AppConfig& config) {
     Json::Value payload(Json::objectValue);
     payload["text"] = text;
-    payload["return_type"] = "base64";
-    payload["format"] = "wav";
-    payload["response_format"] = "wav";
+    payload["prompt"] = text;
     if (!config.tts_voice.empty()) {
         payload["voice"] = config.tts_voice;
     }
     if (!config.tts_speaker.empty()) {
         payload["speaker"] = config.tts_speaker;
-        payload["speaker_id"] = config.tts_speaker;
     }
     return payload;
+}
+
+
+std::string buildTTSRequestUrl(const AppConfig& config) {
+    std::string url = config.tts_endpoint_url;
+    url = appendQueryParam(url, "play", "0");
+    url = appendQueryParam(url, "return_audio", "1");
+    return url;
 }
 
 bool decodeBase64AudioResponse(const std::string& response_body,
@@ -291,10 +300,11 @@ bool maybeSpeakText(const std::string& text, const AppConfig& config) {
 
     std::string response;
     std::string payload_str = Json::writeString(Json::StreamWriterBuilder(), buildTTSRequestPayload(text, config));
+    std::string request_url = buildTTSRequestUrl(config);
     struct curl_slist* headers = nullptr;
     headers = curl_slist_append(headers, "Content-Type: application/json");
 
-    curl_easy_setopt(curl, CURLOPT_URL, config.tts_endpoint_url.c_str());
+    curl_easy_setopt(curl, CURLOPT_URL, request_url.c_str());
     curl_easy_setopt(curl, CURLOPT_POST, 1L);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, payload_str.c_str());
     curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, static_cast<long>(payload_str.size()));
@@ -306,7 +316,10 @@ bool maybeSpeakText(const std::string& text, const AppConfig& config) {
 
     CURLcode res = curl_easy_perform(curl);
     long http_status = 0;
+    char* content_type_cstr = nullptr;
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_status);
+    curl_easy_getinfo(curl, CURLINFO_CONTENT_TYPE, &content_type_cstr);
+    std::string content_type = content_type_cstr ? content_type_cstr : "";
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
 
@@ -321,7 +334,10 @@ bool maybeSpeakText(const std::string& text, const AppConfig& config) {
 
     TTSResponseAudio audio;
     std::string error;
-    if (!decodeBase64AudioResponse(response, audio, error)) {
+    if (content_type.rfind("audio/", 0) == 0 || content_type == "application/octet-stream") {
+        audio.content_type = content_type.empty() ? "audio/wav" : content_type;
+        audio.audio_bytes.assign(response.begin(), response.end());
+    } else if (!decodeBase64AudioResponse(response, audio, error)) {
         std::cerr << "[Warn] TTS response invalid: " << error << "\n";
         return false;
     }

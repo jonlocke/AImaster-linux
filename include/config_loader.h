@@ -35,7 +35,7 @@ struct AppConfig {
 
     // Text-to-speech
     bool tts_enabled = false;
-    std::string tts_endpoint_url = "http://127.0.0.1:5000/tts";
+    std::string tts_endpoint_url = "http://127.0.0.1:8092/speak";
     long tts_timeout_seconds = 10;
     std::string tts_voice;
     std::string tts_speaker;

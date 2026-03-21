@@ -147,7 +147,7 @@ AImaster now supports an additive local `/speak` command:
 - Normal console output is unchanged; speech is played in addition to the printed response.
 - `/speak` is handled locally and is never sent to the LLM as chat content.
 
-When speech is enabled, AImaster sends the final assistant text to the configured Quick-Piper-style HTTP endpoint, expects JSON containing base64 audio, decodes it, writes a temporary WAV file, and attempts playback using the first available backend in this order:
+When speech is enabled, AImaster sends the final assistant text to the configured Quick-Piper-Endpoint `/speak` URL using the documented `play=0&return_audio=1` flow, prefers returned WAV audio bytes directly, and falls back to compatible JSON/base64 parsing if needed before attempting playback with the first available backend in this order:
 
 1. `ffplay`
 2. `paplay`
@@ -162,7 +162,7 @@ These config keys are supported in `config.txt` and `config-example.txt`:
 ```ini
 # Text-to-speech (disabled by default)
 tts_enabled=false
-tts_endpoint_url=http://127.0.0.1:5000/tts
+tts_endpoint_url=http://127.0.0.1:8092/speak
 tts_timeout_seconds=10
 #tts_voice=en-us
 #tts_speaker=narrator
@@ -176,7 +176,7 @@ Environment overrides are also supported:
 - `AIMASTER_TTS_VOICE`
 - `AIMASTER_TTS_SPEAKER`
 
-Request payloads are sent as JSON with `text`, `return_type=base64`, `format=wav`, and `response_format=wav`, plus optional `voice`, `speaker`, and `speaker_id` fields when configured. Response parsing accepts base64 audio from `audio`, `audio_base64`, `wav_base64`, `audio_data`, and nested `data.*` variants.
+Request payloads follow the upstream examples by sending `text` (and `prompt` as a compatibility alias), plus optional `voice` and `speaker` values in the JSON body. The client appends `play=0&return_audio=1` to the configured `/speak` URL so the shim returns WAV audio bytes directly; for resilience it also accepts compatible JSON/base64 fields such as `audio`, `audio_base64`, `wav_base64`, `audio_data`, and nested `data.*` variants.
 
 ### Troubleshooting audio
 
