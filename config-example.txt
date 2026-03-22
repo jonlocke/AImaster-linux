@@ -3,6 +3,7 @@ baudrate=2400
 serial_delay_ms=50
 serial_newline=CR
 serial_wrap_cols=80
+welcome_message_file=assets/welcome.txt
 
 #provider_type=ollama_native
 #ollama_url=http://192.168.1.154:11434/api/chat

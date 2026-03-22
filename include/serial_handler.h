@@ -9,6 +9,8 @@ extern bool serial_available;
 bool initSerial(const std::string& port, int baudrate);
 void serialSend(const std::string& data);
 void setSerialSendDelay(int delay_ms);
+void setWelcomeMessageFile(const std::string& path);
+void serialResetTerminal();
 
 // New: configure how '\n' is written to the wire.
 // Accepts: "CRLF" (default), "LFCR", "LF", "CR" (case-insensitive, others -> default)

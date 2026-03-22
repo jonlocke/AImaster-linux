@@ -537,6 +537,7 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
             cmds["INT"] = "Enter interactive mode with the model.";
             cmds["READ"] = "Send a file with context to the model.";
             cmds["RESET"] = "Clear chat history.";
+            cmds["/RESET"] = "Clear the UART screen and redraw the welcome banner.";
             cmds["/speak on"] = "Enable text-to-speech output for assistant replies.";
             cmds["/speak off"] = "Disable text-to-speech output.";
             cmds["CFG"] = "Show current configuration.";
@@ -551,6 +552,19 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
         route_output("Available commands:", true);
         for (auto& key : cmds.getMemberNames()) {
             route_output("  " + key + " - " + cmds[key].asString(), true);
+        }
+        return result;
+    }
+    // ===== /RESET =====
+    else if (cmd_upper == "/RESET") {
+        if (getCurrentCommandSource() == CommandSource::SERIAL) {
+            serialResetTerminal();
+            result["status"] = "success";
+            result["message"] = "UART terminal reset.";
+        } else {
+            route_output("[Info] /RESET is only available over the serial terminal.", true);
+            result["status"] = "error";
+            result["message"] = "/RESET is only available over the serial terminal.";
         }
         return result;
     }
