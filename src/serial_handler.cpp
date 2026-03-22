@@ -81,6 +81,10 @@ void serialResetTerminal() {
     serialSend("\f");
     using namespace std::chrono_literals;
     std::this_thread::sleep_for(250ms);
+    // Some attached terminals need an explicit carriage return after form-feed
+    // or the first printable character of the banner can be dropped/skewed.
+    serialSend("\r");
+    std::this_thread::sleep_for(50ms);
     serialSend(load_welcome_message());
     serialSend("\nAImaster: Link active\n");
     serialSend("AImaster: Online\n");
