@@ -161,6 +161,26 @@ bool runPlayback(const std::vector<std::string>& argv, std::string& error) {
     return true;
 }
 
+
+std::vector<std::string> playbackBackendOrder() {
+    std::vector<std::string> order;
+    const char* env = std::getenv("AIMASTER_TTS_BACKENDS");
+    if (env && *env) {
+        std::stringstream ss(env);
+        std::string item;
+        while (std::getline(ss, item, ',')) {
+            item = trim_copy(item);
+            std::transform(item.begin(), item.end(), item.begin(), [](unsigned char c){ return std::tolower(c); });
+            if ((item == "paplay" || item == "aplay" || item == "ffplay") &&
+                std::find(order.begin(), order.end(), item) == order.end()) {
+                order.push_back(item);
+            }
+        }
+    }
+    if (order.empty()) order = {"paplay", "aplay", "ffplay"};
+    return order;
+}
+
 bool playAudioBytes(const std::vector<unsigned char>& audio, std::string& backend_used, std::string& error) {
     std::string path;
     if (!writeAudioTempFile(audio, path, error)) return false;
@@ -172,9 +192,13 @@ bool playAudioBytes(const std::vector<unsigned char>& audio, std::string& backen
 
     std::vector<Backend> backends;
     std::string exe;
-    if (findExecutable("paplay", exe)) backends.push_back({"paplay", {exe, path}});
-    if (findExecutable("aplay", exe)) backends.push_back({"aplay", {exe, "-q", path}});
-    if (findExecutable("ffplay", exe)) backends.push_back({"ffplay", {exe, "-nodisp", "-autoexit", "-loglevel", "error", path}});
+    const auto order = playbackBackendOrder();
+    for (const auto& name : order) {
+        if (!findExecutable(name, exe)) continue;
+        if (name == "paplay") backends.push_back({"paplay", {exe, path}});
+        else if (name == "aplay") backends.push_back({"aplay", {exe, "-q", path}});
+        else if (name == "ffplay") backends.push_back({"ffplay", {exe, "-nodisp", "-autoexit", "-loglevel", "error", path}});
+    }
 
     if (backends.empty()) {
         ::unlink(path.c_str());

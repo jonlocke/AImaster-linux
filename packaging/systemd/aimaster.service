@@ -8,6 +8,7 @@ Type=simple
 User=aimaster
 Group=aimaster
 SupplementaryGroups=audio dialout
+Environment=AIMASTER_TTS_BACKENDS=aplay,ffplay,paplay
 WorkingDirectory=/var/lib/aimaster
 RuntimeDirectory=aimaster
 RuntimeDirectoryMode=0750

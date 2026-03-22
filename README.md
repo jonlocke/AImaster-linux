@@ -175,6 +175,7 @@ Environment overrides are also supported:
 - `AIMASTER_TTS_TIMEOUT_SECONDS`
 - `AIMASTER_TTS_VOICE`
 - `AIMASTER_TTS_SPEAKER`
+- `AIMASTER_TTS_BACKENDS` (comma-separated override such as `aplay,ffplay,paplay`)
 
 Request payloads follow the upstream examples by sending `text` (and `prompt` as a compatibility alias), plus optional `voice` and `speaker` values in the JSON body. The client appends `play=0&stream_audio_chunks=1` to the configured `/speak` URL so Quick-Piper can stream base64 WAV chunks for incremental playback; for resilience it also accepts direct WAV responses and compatible JSON/base64 fields such as `audio`, `audio_base64`, `wav_base64`, `audio_data`, and nested `data.*` variants.
 
@@ -203,7 +204,7 @@ AImaster now includes a Debian packaging helper at `scripts/build_deb.sh`. It bu
 - a systemd unit at `/usr/lib/systemd/system/aimaster.service`
 - default runtime assets at `/usr/share/aimaster/`
 
-The package's maintainer scripts create a dedicated `aimaster` system user/group, create `/var/lib/aimaster` and `/var/log/aimaster`, copy a default `config.txt` and `cmds.csv` into `/var/lib/aimaster` when missing, add the service user to `dialout`/`audio` when those groups exist, and enable/start the `aimaster.service` unit. The service unit also requests `SupplementaryGroups=audio dialout` so the service account can reach sound and serial devices on typical Debian systems. To keep the interactive readline-based CLI alive under systemd, the package launches it through `/usr/lib/aimaster/aimaster-service.sh`, which allocates a PTY with `script(1)` and holds `/run/aimaster/input.fifo` open so the process does not exit on immediate EOF.
+The package's maintainer scripts create a dedicated `aimaster` system user/group, create `/var/lib/aimaster` and `/var/log/aimaster`, copy a default `config.txt` and `cmds.csv` into `/var/lib/aimaster` when missing, add the service user to `dialout`/`audio` when those groups exist, and enable/start the `aimaster.service` unit. The service unit also requests `SupplementaryGroups=audio dialout` and sets `AIMASTER_TTS_BACKENDS=aplay,ffplay,paplay` so the service account prefers direct ALSA playback instead of depending on a desktop PulseAudio session. To keep the interactive readline-based CLI alive under systemd, the package launches it through `/usr/lib/aimaster/aimaster-service.sh`, which allocates a PTY with `script(1)` and holds `/run/aimaster/input.fifo` open so the process does not exit on immediate EOF.
 
 Example build commands:
 
