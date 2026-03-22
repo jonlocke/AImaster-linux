@@ -1,0 +1,11 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+  remove|deconfigure|upgrade|failed-upgrade)
+    systemctl stop aimaster.service >/dev/null 2>&1 || true
+    systemctl disable aimaster.service >/dev/null 2>&1 || true
+    ;;
+esac
+
+exit 0

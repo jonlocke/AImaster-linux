@@ -193,3 +193,23 @@ Request payloads follow the upstream examples by sending `text` (and `prompt` as
 - Increase `tts_timeout_seconds` if synthesis is slow.
 - If needed, set `tts_voice` and `tts_speaker` to values accepted by your endpoint deployment.
 - If the endpoint is unavailable or returns invalid JSON, AImaster keeps the normal text reply and logs a warning instead of crashing.
+
+## Debian packaging and systemd service
+
+AImaster now includes a Debian packaging helper at `scripts/build_deb.sh`. It builds a `.deb` that installs:
+
+- the binary at `/usr/lib/aimaster/AImaster`
+- a systemd unit at `/usr/lib/systemd/system/aimaster.service`
+- default runtime assets at `/usr/share/aimaster/`
+
+The package's maintainer scripts create a dedicated `aimaster` system user/group, create `/var/lib/aimaster` and `/var/log/aimaster`, copy a default `config.txt` and `cmds.csv` into `/var/lib/aimaster` when missing, add the service user to `dialout`/`audio` when those groups exist, and enable/start the `aimaster.service` unit.
+
+Example build commands:
+
+```bash
+scripts/build_deb.sh
+scripts/build_deb.sh --version 1.0.0
+scripts/build_deb.sh --skip-build
+```
+
+The installed service runs system-wide under the dedicated `aimaster` account with `WorkingDirectory=/var/lib/aimaster`. If your deployment needs a different serial device path, provider URL, or TTS settings, edit `/var/lib/aimaster/config.txt` after installation and restart the service.

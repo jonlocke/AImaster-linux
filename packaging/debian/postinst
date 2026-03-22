@@ -1,0 +1,36 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+  configure)
+    if ! getent group aimaster >/dev/null; then
+      addgroup --system aimaster
+    fi
+    if ! id -u aimaster >/dev/null 2>&1; then
+      adduser --system --ingroup aimaster --home /var/lib/aimaster --no-create-home \
+        --gecos "AImaster service user" aimaster
+    fi
+
+    install -d -o aimaster -g aimaster /var/lib/aimaster /var/log/aimaster
+
+    if [ ! -f /var/lib/aimaster/config.txt ]; then
+      install -o aimaster -g aimaster -m 0640 /usr/share/aimaster/config-example.txt /var/lib/aimaster/config.txt
+    fi
+    if [ ! -f /var/lib/aimaster/cmds.csv ]; then
+      install -o aimaster -g aimaster -m 0644 /usr/share/aimaster/cmds.csv /var/lib/aimaster/cmds.csv
+    fi
+
+    if getent group dialout >/dev/null; then
+      adduser aimaster dialout >/dev/null 2>&1 || true
+    fi
+    if getent group audio >/dev/null; then
+      adduser aimaster audio >/dev/null 2>&1 || true
+    fi
+
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    systemctl enable aimaster.service >/dev/null 2>&1 || true
+    systemctl restart aimaster.service >/dev/null 2>&1 || systemctl start aimaster.service >/dev/null 2>&1 || true
+    ;;
+esac
+
+exit 0
