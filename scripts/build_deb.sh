@@ -62,6 +62,7 @@ fi
 
 install -m 0755 "$ROOT_DIR/AImaster" "$PKG_ROOT/usr/lib/aimaster/AImaster"
 install -m 0644 "$ROOT_DIR/packaging/systemd/aimaster.service" "$PKG_ROOT/usr/lib/systemd/system/aimaster.service"
+install -m 0755 "$ROOT_DIR/packaging/systemd/aimaster-service.sh" "$PKG_ROOT/usr/lib/aimaster/aimaster-service.sh"
 install -m 0644 "$ROOT_DIR/config-example.txt" "$PKG_ROOT/usr/share/aimaster/config-example.txt"
 install -m 0644 "$ROOT_DIR/cmds.csv" "$PKG_ROOT/usr/share/aimaster/cmds.csv"
 install -m 0644 "$ROOT_DIR/README.md" "$PKG_ROOT/usr/share/doc/aimaster/README.md"
@@ -77,7 +78,7 @@ Section: utils
 Priority: optional
 Architecture: $ARCH
 Maintainer: AImaster Packaging <noreply@example.com>
-Depends: adduser, systemd
+Depends: adduser, systemd, util-linux
 Description: AImaster CLI with systemd service support
  AImaster is an interactive CLI assistant with provider-compatible chat,
  optional local text-to-speech, and serial/RAG integrations.
