@@ -7,10 +7,15 @@
 #include <atomic>
 #include <mutex>
 #include <functional>
+#include <fstream>
+#include <sstream>
+#include <array>
 
 #include <libserialport.h>
 #include "serial_handler.h"
 #include "io_sink.h"
+#include "config_loader.h"
+#include "ollama_client.h"
 
 bool serial_available = false;
 static sp_port* serial_port = nullptr;
@@ -23,6 +28,7 @@ static std::thread serial_thread;
 static std::atomic<bool> serial_thread_running{false};
 static std::function<void(const std::string&)> line_callback = nullptr;
 static std::string rx_buffer;
+static std::string welcome_message_file = "/usr/share/aimaster/welcome.txt";
 
 static int to_policy(const std::string& s) {
     std::string k; k.reserve(s.size());
@@ -41,6 +47,56 @@ void setSerialNewlinePolicy(const std::string& policy) {
 void setSerialSendDelay(int delay_ms) {
     if (delay_ms < 0) delay_ms = 0;
     serial_send_delay_ms.store(delay_ms, std::memory_order_relaxed);
+}
+
+void setWelcomeMessageFile(const std::string& path) {
+    if (!path.empty()) welcome_message_file = path;
+}
+
+static std::string load_welcome_message() {
+    const std::array<std::string, 3> candidates = {
+        welcome_message_file,
+        "/usr/share/aimaster/welcome.txt",
+        "assets/welcome.txt"
+    };
+
+    for (const auto& candidate : candidates) {
+        if (candidate.empty()) continue;
+        std::ifstream in(candidate);
+        if (!in) continue;
+
+        std::ostringstream buffer;
+        buffer << in.rdbuf();
+        std::string message = buffer.str();
+        if (message.empty()) continue;
+        if (message.back() != '\n') {
+            message.push_back('\n');
+        }
+        return message;
+    }
+
+    return "Welcome to AImaster\n";
+}
+
+void serialResetTerminal(const AppConfig& config) {
+    if (!serial_available || serial_port == nullptr) return;
+    serialSend("\f");
+    using namespace std::chrono_literals;
+    std::this_thread::sleep_for(250ms);
+    // Some attached terminals need an explicit carriage return after form-feed
+    // or the first printable character of the banner can be dropped/skewed.
+    serialSend("\r");
+    std::this_thread::sleep_for(50ms);
+    serialSend(load_welcome_message());
+    serialSend("\nAImaster: Link active\n");
+    serialSend("AImaster: Online\n");
+    serialSend(": --> Type help for help!\n");
+    serialSend("AImaster: AIinterface active\n\n");
+    if (SerialINT_IsActive()) {
+        serialSend("-> ");
+    } else {
+        serialSend(modelPrompt(config, "> "));
+    }
 }
 
 static bool set_port_config(sp_port* port_handle, int baudrate) {
@@ -73,25 +129,6 @@ bool initSerial(const std::string& port, int baudrate) {
     }
     serial_port = handle;
     serial_available = true;
-    //outln("AImaster: Serial link active");
-    //emit_prompt();
-
-    // Optional: announce
-    serialSend("\f");
-    using namespace std::chrono_literals;
-    std::this_thread::sleep_for(1234ms);
-    serialSend("Welcome to AImaster\n\n");
-    std::this_thread::sleep_for(1234ms);
-    serialSend("AImaster: Link active\n");
-    std::this_thread::sleep_for(1234ms);
-    serialSend("AImaster: Online\n");
-    std::this_thread::sleep_for(1234ms);
-    serialSend(": --> Type help for help!\n");
-    std::this_thread::sleep_for(1234ms);
-    serialSend("AImaster: AIinterface active\n\n");
-    std::this_thread::sleep_for(1234ms);
-    emit_prompt();
-
     return true;
 }
 
@@ -191,13 +228,18 @@ bool serialReadLine(std::string& out, int timeout_ms) {
 
         int n = sp_nonblocking_read(serial_port, &byte, 1);
         if (n == 1) {
-            rx_buffer.push_back(byte);
+            const unsigned char ch = static_cast<unsigned char>(byte);
+            if (ch == 0x08 || ch == 0x7F) {
+                if (!rx_buffer.empty()) rx_buffer.pop_back();
+                continue;
+            }
             if (byte == '\n' || byte == '\r') {
                 out = rx_buffer;
                 rstrip_crlf(out);
                 rx_buffer.clear();
                 return true;
             }
+            rx_buffer.push_back(byte);
             if (rx_buffer.size() > 4096) {
                 out = rx_buffer;
                 rstrip_crlf(out);

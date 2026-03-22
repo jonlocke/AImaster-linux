@@ -13,6 +13,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <set>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <vector>
@@ -161,7 +162,6 @@ bool runPlayback(const std::vector<std::string>& argv, std::string& error) {
     return true;
 }
 
-
 std::vector<std::string> playbackBackendOrder() {
     std::vector<std::string> order;
     const char* env = std::getenv("AIMASTER_TTS_BACKENDS");
@@ -181,7 +181,7 @@ std::vector<std::string> playbackBackendOrder() {
     return order;
 }
 
-bool playAudioBytes(const std::vector<unsigned char>& audio, std::string& backend_used, std::string& error) {
+bool playAudioBytes(const std::vector<unsigned char>& audio, const AppConfig& config, std::string& backend_used, std::string& error) {
     std::string path;
     if (!writeAudioTempFile(audio, path, error)) return false;
 
@@ -196,7 +196,15 @@ bool playAudioBytes(const std::vector<unsigned char>& audio, std::string& backen
     for (const auto& name : order) {
         if (!findExecutable(name, exe)) continue;
         if (name == "paplay") backends.push_back({"paplay", {exe, path}});
-        else if (name == "aplay") backends.push_back({"aplay", {exe, "-q", path}});
+        else if (name == "aplay") {
+            std::vector<std::string> args{exe, "-q"};
+            if (!config.tts_output_device.empty()) {
+                args.push_back("-D");
+                args.push_back(config.tts_output_device);
+            }
+            args.push_back(path);
+            backends.push_back({"aplay", std::move(args)});
+        }
         else if (name == "ffplay") backends.push_back({"ffplay", {exe, "-nodisp", "-autoexit", "-loglevel", "error", path}});
     }
 
@@ -221,6 +229,35 @@ bool playAudioBytes(const std::vector<unsigned char>& audio, std::string& backen
 }
 
 } // namespace
+
+std::vector<PlaybackDevice> listPlaybackDevices(std::string& error) {
+    std::vector<PlaybackDevice> devices;
+    devices.push_back({"plughw:0,0", "Linux default card0,0", true});
+
+    FILE* pipe = ::popen("aplay -l 2>/dev/null", "r");
+    if (!pipe) {
+        error = "unable to execute 'aplay -l'";
+        return devices;
+    }
+
+    char buffer[512];
+    std::set<std::string> seen = {"plughw:0,0"};
+    while (std::fgets(buffer, sizeof(buffer), pipe)) {
+        std::string line = trim_copy(buffer);
+        if (line.rfind("card ", 0) != 0) continue;
+
+        int card = -1;
+        int device = -1;
+        if (std::sscanf(line.c_str(), "card %d: %*[^,], device %d:", &card, &device) != 2) continue;
+
+        std::string id = "plughw:" + std::to_string(card) + "," + std::to_string(device);
+        if (!seen.insert(id).second) continue;
+        devices.push_back({id, line, card == 0 && device == 0});
+    }
+
+    ::pclose(pipe);
+    return devices;
+}
 
 SpeakCommandResult parseSpeakCommand(const std::string& command) {
     SpeakCommandResult out;
@@ -448,13 +485,12 @@ static bool speakTextNow(const std::string& text, const AppConfig& config) {
 
     std::string backend_used;
     for (const auto& chunk : audio_chunks) {
-        if (!playAudioBytes(chunk, backend_used, error)) {
+        if (!playAudioBytes(chunk, config, backend_used, error)) {
             std::cerr << "[Warn] TTS playback failed: " << error << "\n";
             return false;
         }
     }
 
-    std::cerr << "[Info] TTS playback backend: " << backend_used << "\n";
     return true;
 }
 

@@ -51,6 +51,7 @@ config.txt
 
 # outputted code
 code/*.txt
+dist/
 ollama_cli
 AImaster
 rag/6502DevelopmentPackage.pdf

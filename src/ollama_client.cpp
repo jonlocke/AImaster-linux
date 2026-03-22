@@ -184,6 +184,54 @@ namespace {
             pos = end + delimiter.length();
         }
     }
+
+    void writeThinkingStatusRaw(const std::string& text, bool use_serial) {
+        if (use_serial && serial_available) {
+            serialSend(text);
+        } else {
+            std::cout << text;
+            std::cout.flush();
+        }
+    }
+
+    class ThinkingSpinner {
+    public:
+        explicit ThinkingSpinner(bool use_serial) : use_serial_(use_serial) {}
+
+        void start() {
+            active_.store(true, std::memory_order_relaxed);
+            writeThinkingStatusRaw("[Thinking -]", use_serial_);
+            worker_ = std::thread([this]() {
+                static constexpr char frames[] = {'-', '/', '-', '\\'};
+                std::size_t idx = 1;
+                using namespace std::chrono_literals;
+                while (active_.load(std::memory_order_relaxed)) {
+                    std::this_thread::sleep_for(150ms);
+                    if (!active_.load(std::memory_order_relaxed)) break;
+                    std::string update = "\b\b";
+                    update.push_back(frames[idx]);
+                    update.push_back(']');
+                    writeThinkingStatusRaw(update, use_serial_);
+                    idx = (idx + 1) % 4;
+                }
+            });
+        }
+
+        void stop(bool newline) {
+            const bool was_active = active_.exchange(false, std::memory_order_relaxed);
+            if (worker_.joinable()) worker_.join();
+            if (was_active && newline) writeThinkingStatusRaw("\n", use_serial_);
+        }
+
+        ~ThinkingSpinner() {
+            stop(false);
+        }
+
+    private:
+        bool use_serial_ = false;
+        std::atomic<bool> active_{false};
+        std::thread worker_;
+    };
 }
 
 // ---- Send message to configured provider ----
@@ -199,7 +247,9 @@ static bool sendMessageToOllama(const std::string& query,
     StreamData streamData;
     const CommandSource prev = getCurrentCommandSource();
     setCurrentCommandSource(prev);
-    route_output("[Thinking.....:-).......]", true);
+    const bool use_serial_spinner = (prev == CommandSource::SERIAL);
+    ThinkingSpinner spinner(use_serial_spinner);
+    spinner.start();
     streamData.start_time = std::chrono::high_resolution_clock::now();
 
     std::unique_ptr<StreamingTTSPlayer> tts_player;
@@ -213,6 +263,7 @@ static bool sendMessageToOllama(const std::string& query,
         [&](const std::string& text) {
             if (!streamData.first_chunk_received) {
                 streamData.first_chunk_received = true;
+                spinner.stop(true);
                 auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::high_resolution_clock::now() - streamData.start_time
                 ).count();
@@ -232,6 +283,7 @@ static bool sendMessageToOllama(const std::string& query,
         providerResult
     );
 
+    if (!streamData.first_chunk_received) spinner.stop(true);
     route_output("", true);
     setCurrentCommandSource(prev);
     if (tts_player) tts_player->finish();
@@ -289,8 +341,8 @@ bool SerialINT_IsActive() {
 void SerialINT_Start(AppConfig& config) {
     g_serial_int_active.store(true, std::memory_order_relaxed);
     diag_log("[DIAG] INT called from source=%d\n", (int)getCurrentCommandSource());
-    route_output("[Interactive Mode] Type your messages. Type /bye to exit.\n", true);
-    route_output("-> ");
+    route_output("[Interactive Mode] Type your messages. Type /bye to exit.", true);
+    route_output("-> ", false);
 }
 
 void SerialINT_HandleLine(const std::string& line, AppConfig& config) {
@@ -348,6 +400,12 @@ static std::string rtrim(std::string s){
 }
 static std::string trim(std::string s){ return rtrim(ltrim(s)); }
 
+static bool eq_ci(const std::string& a, const std::string& b){
+    if (a.size()!=b.size()) return false;
+    for (size_t i=0;i<a.size();++i) if (std::tolower((unsigned char)a[i])!=std::tolower((unsigned char)b[i])) return false;
+    return true;
+}
+
 // ================= Dispatcher =================
 Json::Value processCommand(const std::string& command, AppConfig& config) {
 
@@ -377,6 +435,65 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
         route_output(speak.message, true);
         result["status"] = (cmd_upper == "/SPEAK ON" || cmd_upper == "/SPEAK OFF") ? "success" : "error";
         result["tts_enabled"] = config.tts_enabled;
+        return result;
+    }
+    if (cmd_upper == "/SOUND" || cmd_upper.rfind("/SOUND ", 0) == 0) {
+        std::string arg = command.size() > 6 ? trim(command.substr(6)) : "";
+        std::string device_error;
+        auto devices = listPlaybackDevices(device_error);
+        Json::Value device_list(Json::arrayValue);
+        for (const auto& device : devices) {
+            Json::Value item(Json::objectValue);
+            item["id"] = device.id;
+            item["description"] = device.description;
+            item["default"] = device.is_default;
+            item["current"] = (device.id == config.tts_output_device);
+            device_list.append(item);
+        }
+        result["devices"] = device_list;
+
+        if (arg.empty()) {
+            route_output("Available sound output devices:", true);
+            for (size_t i = 0; i < devices.size(); ++i) {
+                std::string line = "  [" + std::to_string(i + 1) + "] " + devices[i].id + " - " + devices[i].description;
+                if (devices[i].is_default) line += " (default)";
+                if (devices[i].id == config.tts_output_device) line += " (current)";
+                route_output(line, true);
+            }
+            if (!device_error.empty()) route_output(std::string("[Warn] ") + device_error, true);
+            route_output("Use: /sound <#|device> to set the TTS output device.", true);
+            result["status"] = "success";
+            return result;
+        }
+
+        int idx = -1;
+        try { idx = std::stoi(arg); } catch (...) { idx = -1; }
+        std::string chosen;
+        if (idx >= 1 && idx <= (int)devices.size()) {
+            chosen = devices[idx - 1].id;
+        } else {
+            for (const auto& device : devices) {
+                if (device.id == arg || eq_ci(device.id, arg) || eq_ci(device.description, arg)) {
+                    chosen = device.id;
+                    break;
+                }
+            }
+        }
+
+        if (chosen.empty()) {
+            route_output(std::string("[Error] Sound device not found: ") + arg, true);
+            result["status"] = "error";
+            return result;
+        }
+
+        config.tts_output_device = chosen;
+        result["tts_output_device"] = chosen;
+        if (saveConfig("config.txt", config)) {
+            route_output(std::string("[OK] tts_output_device=") + chosen + " (saved)", true);
+        } else {
+            route_output(std::string("[OK] tts_output_device=") + chosen + " (save failed)", true);
+        }
+        result["status"] = "success";
         return result;
     }
 
@@ -422,6 +539,7 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
     else if (cmd_upper == "INT") {
         SerialINT_Start(config);
         result["status"] = "success";
+        result["prompt_emitted"] = true;
         return result;
     }
     // ===== READ =====
@@ -486,6 +604,7 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
         result["tts_timeout_seconds"] = Json::Value(static_cast<Json::UInt64>(config.tts_timeout_seconds));
         result["tts_voice"] = config.tts_voice;
         result["tts_speaker"] = config.tts_speaker;
+        result["tts_output_device"] = config.tts_output_device;
         route_output("Current configuration:", true);
         route_output(std::string("\tSerial port: ") + config.serial_port, true);
         route_output(std::string("\tBaudrate: ") + std::to_string(config.baudrate), true);
@@ -498,7 +617,7 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
         route_output(std::string("\tRAG threshold (ASK/INT): ") + std::to_string(config.rag_threshold), true);
         route_output(std::string("\tChar delay: ") + std::to_string(config.serial_delay_ms), true);
         route_output(std::string("\tNewline: ") + config.serial_newline, true);
-        route_output("->", false);
+        route_output(std::string("\tTTS output device: ") + config.tts_output_device, true);
         return result;
     }
     // ===== DELAY =====
@@ -521,7 +640,6 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
         } else {
             route_output(std::string("[OK] serial_delay_ms=") + std::to_string(ms) + " (save failed)", true);
         }
-        route_output("->", false);
         return Json::Value();
     }
     // ===== HELP =====
@@ -537,8 +655,10 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
             cmds["INT"] = "Enter interactive mode with the model.";
             cmds["READ"] = "Send a file with context to the model.";
             cmds["RESET"] = "Clear chat history.";
+            cmds["/RESET"] = "Clear the UART screen and redraw the welcome banner.";
             cmds["/speak on"] = "Enable text-to-speech output for assistant replies.";
             cmds["/speak off"] = "Disable text-to-speech output.";
+            cmds["/sound"] = "List or set the TTS output device.";
             cmds["CFG"] = "Show current configuration.";
             cmds["HELP"] = "List available commands.";
             cmds["MODEL"] = "List or set Ollama model.";
@@ -551,6 +671,20 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
         route_output("Available commands:", true);
         for (auto& key : cmds.getMemberNames()) {
             route_output("  " + key + " - " + cmds[key].asString(), true);
+        }
+        return result;
+    }
+    // ===== /RESET =====
+    else if (cmd_upper == "/RESET") {
+        if (getCurrentCommandSource() == CommandSource::SERIAL) {
+            serialResetTerminal(config);
+            result["status"] = "success";
+            result["message"] = "UART terminal reset.";
+            result["prompt_emitted"] = true;
+        } else {
+            route_output("[Info] /RESET is only available over the serial terminal.", true);
+            result["status"] = "error";
+            result["message"] = "/RESET is only available over the serial terminal.";
         }
         return result;
     }
@@ -593,11 +727,6 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
         if (idx >= 1 && idx <= (int)models.size()) {
             chosen = models[idx-1];
         } else {
-            auto eq_ci = [](const std::string& a, const std::string& b){
-                if (a.size()!=b.size()) return false;
-                for (size_t i=0;i<a.size();++i) if (std::tolower((unsigned char)a[i])!=std::tolower((unsigned char)b[i])) return false;
-                return true;
-            };
             for (auto& m : models) if (m == arg || eq_ci(m, arg)) { chosen = m; break; }
         }
 

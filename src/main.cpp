@@ -189,6 +189,7 @@ int main() {
     // After loadConfig("config.txt", config);
 setSerialWrapColumns(config.serial_wrap_cols);
 AIMaster_RAG_ConfigureRemote(config.ollama_url, config.ollama_model);
+setWelcomeMessageFile(config.welcome_message_file);
 // Ping Ollama server with 2s timeout (non-fatal)
     {
         long http_code = 0;
@@ -221,6 +222,9 @@ setSerialSendDelay(config.serial_delay_ms);      // <- make sure this line exist
         std::cerr << "Warning: No serial port available. Using console mode." << std::endl;
     }
 if (serial_available) {
+serialResetTerminal(config);
+}
+if (serial_available) {
 startSerialListener([&](const std::string& line) {
     try {
                 setCurrentCommandSource(CommandSource::SERIAL);  // <-- add this line
@@ -234,7 +238,15 @@ startSerialListener([&](const std::string& line) {
         
 //serialSend(modelPrompt(config, "> "));
 } else {
-            (void)execute_command(line, config, CommandSource::SERIAL);
+            Json::Value result = execute_command(line, config, CommandSource::SERIAL);
+            const bool prompt_emitted = result.get("prompt_emitted", false).asBool();
+            if (!prompt_emitted && !ReadAwait_IsActive()) {
+                if (SerialINT_IsActive()) {
+                    route_output("-> ", false);
+                } else {
+                    route_output(modelPrompt(config, "> "), false);
+                }
+            }
         }
     } catch (...) {
         std::cerr << "[Warning] exception in serial command handler\n";

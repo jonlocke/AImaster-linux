@@ -83,6 +83,7 @@ bool loadConfig(const std::string& path, AppConfig& out) {
         else if (key == "baudrate")    { int v; if (parse_int(val, v)) out.baudrate = v; }
         else if (key == "serial_delay_ms") { int v; if (parse_int(val, v) && v>=0) out.serial_delay_ms = v; }
         else if (key == "serial_newline")  { out.serial_newline = val; }
+        else if (key == "welcome_message_file") { out.welcome_message_file = val; }
         else if (key == "ollama_url")  out.ollama_url = val;
         else if (key == "ollama_model") out.ollama_model = val;
         else if (key == "ollama_timeout_seconds") { long v; if (parse_long(val, v) && v>=0) out.ollama_timeout_seconds = v; }
@@ -100,6 +101,7 @@ bool loadConfig(const std::string& path, AppConfig& out) {
         else if (key == "tts_timeout_seconds") { long v; if (parse_long(val, v) && v > 0) out.tts_timeout_seconds = v; }
         else if (key == "tts_voice") out.tts_voice = val;
         else if (key == "tts_speaker") out.tts_speaker = val;
+        else if (key == "tts_output_device") out.tts_output_device = val;
         else if (key == "tts_enabled") { bool v; if (parse_bool(val, v)) out.tts_enabled = v; }
         else if (key == "extra_header") parse_extra_header(val, out.extra_headers);
         else if (key == "rag_chunks") { int v; if (parse_int(val, v) && v > 0) out.rag_chunks = v; }
@@ -121,6 +123,7 @@ bool loadConfig(const std::string& path, AppConfig& out) {
     if (const char* env = std::getenv("AIMASTER_TTS_TIMEOUT_SECONDS")) { long v; if (parse_long(env, v) && v > 0) out.tts_timeout_seconds = v; }
     if (const char* env = std::getenv("AIMASTER_TTS_VOICE")) out.tts_voice = env;
     if (const char* env = std::getenv("AIMASTER_TTS_SPEAKER")) out.tts_speaker = env;
+    if (const char* env = std::getenv("AIMASTER_TTS_OUTPUT_DEVICE")) out.tts_output_device = env;
 
     return true;
 }
@@ -134,6 +137,7 @@ bool saveConfig(const std::string& path, const AppConfig& cfg) {
     out << "baudrate=" << cfg.baudrate << "\n";
     out << "serial_delay_ms=" << cfg.serial_delay_ms << "\n";
     out << "serial_newline=" << cfg.serial_newline << "\n";
+    out << "welcome_message_file=" << cfg.welcome_message_file << "\n";
     out << "ollama_url=" << cfg.ollama_url << "\n";
     out << "ollama_model=" << cfg.ollama_model << "\n";
     out << "ollama_timeout_seconds=" << cfg.ollama_timeout_seconds << "\n";
@@ -152,6 +156,7 @@ bool saveConfig(const std::string& path, const AppConfig& cfg) {
     out << "tts_timeout_seconds=" << cfg.tts_timeout_seconds << "\n";
     if (!cfg.tts_voice.empty()) out << "tts_voice=" << cfg.tts_voice << "\n";
     if (!cfg.tts_speaker.empty()) out << "tts_speaker=" << cfg.tts_speaker << "\n";
+    if (!cfg.tts_output_device.empty()) out << "tts_output_device=" << cfg.tts_output_device << "\n";
     for (const auto& kv : cfg.extra_headers) out << "extra_header=" << kv.first << ": " << kv.second << "\n";
     out << "rag_chunks=" << cfg.rag_chunks << "\n";
     out << "rag_threshold=" << cfg.rag_threshold << "\n";

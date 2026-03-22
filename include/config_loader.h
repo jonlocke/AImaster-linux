@@ -13,6 +13,7 @@ struct AppConfig {
 
     int serial_delay_ms = 50;
     std::string serial_newline = "CRLF"; // NEW: CRLF (default), LFCR, LF, CR
+    std::string welcome_message_file = "/usr/share/aimaster/welcome.txt";
 
     // Ollama / provider compatibility
     std::string ollama_url = "http://localhost:11434";
@@ -39,6 +40,7 @@ struct AppConfig {
     long tts_timeout_seconds = 10;
     std::string tts_voice;
     std::string tts_speaker;
+    std::string tts_output_device = "plughw:0,0";
 
     // RAG retrieval defaults (used by ASK/INT when RAG is active)
     int rag_chunks = 25;

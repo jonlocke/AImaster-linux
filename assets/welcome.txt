@@ -1,0 +1,6 @@
+HH   HH  OOOOO  LL      LL    YY   YY        6666   0000   0000
+HH   HH OO   OO LL      LL     YY YY        66     00  00 00  00
+HHHHHHH OO   OO LL      LL      YYY        66      00  00 00  00
+HH   HH OO   OO LL      LL      YYY        66666   00  00 00  00
+HH   HH OO   OO LL      LL      YYY        66  66  00  00 00  00
+HH   HH  OOOOO  LLLLLLL LLLLLLL YYY         6666    0000   0000
