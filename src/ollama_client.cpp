@@ -6,6 +6,7 @@
 #include "rag_int_bridge.hpp"
 #include "utils.h"
 #include "chat_provider.hpp"
+#include "tts.hpp"
 
 #include <curl/curl.h>
 #include <algorithm>
@@ -16,6 +17,7 @@
 #include <iostream>
 #include <cstdarg>
 #include <sstream>
+#include <memory>
 #include <vector>
 #include "route_context.h"
 
@@ -74,14 +76,6 @@ static size_t ocurl_write_to_string(void* contents, size_t size, size_t nmemb, v
     s->append((char*)contents, total);
     return total;
 }
-<<<<<<< HEAD
-static std::string oderive_tags_endpoint(const std::string& chat_url) {
-    auto pos = chat_url.find("/api/");
-    if (pos == std::string::npos) return chat_url;
-    return chat_url.substr(0, pos) + "/api/tags";
-}
-=======
->>>>>>> codex/add-openai-compatibility-adapter-to-aimaster-jt0i1p
 static std::vector<std::string> fetch_provider_models(const AppConfig& config, std::string& error) {
     std::vector<std::string> models;
     std::string url = deriveModelsUrl(config);
@@ -192,63 +186,6 @@ namespace {
     }
 }
 
-<<<<<<< HEAD
-static size_t StreamCallback(void* contents, size_t size, size_t nmemb, void* userp) {
-    size_t totalSize = size * nmemb;
-    std::string chunk((char*)contents, totalSize);
-
-    if (diagMode) {
-        std::cerr << "\n[DIAG CHUNK] " << chunk << std::endl;
-    }
-
-    StreamData* data = (StreamData*)userp;
-    if (!data->first_chunk_received) {
-        data->first_chunk_received = true;
-        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::high_resolution_clock::now() - data->start_time
-        ).count();
-        route_output(std::string("[Response ") + std::to_string(elapsed) + "ms]", true);
-    }
-    data->raw_output += chunk;
-
-    Json::CharReaderBuilder reader;
-    Json::Value parsed;
-    std::string errs;
-    std::istringstream ss(chunk);
-
-    if (Json::parseFromStream(reader, ss, &parsed, &errs)) {
-        if (parsed.isObject() &&
-            parsed.isMember("message") &&
-            parsed["message"].isObject() &&
-            parsed["message"].isMember("content")) {
-
-            std::string text = parsed["message"]["content"].asString();
-            route_output(text);
-
-            if (!serial_available) {
-                std::ofstream log("log.txt", std::ios::app);
-                if (log.is_open()) {
-                    log << text;
-                    log.flush();
-                }
-            }
-            data->collected += text;
-        }
-    }
-    return totalSize;
-}
-
-static void setCurlStreamingOptions(CURL* curl, struct curl_slist*& headers) {
-    curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
-    curl_easy_setopt(curl, CURLOPT_TCP_NODELAY, 1L);
-    headers = curl_slist_append(headers, "Content-Type: application/json");
-    headers = curl_slist_append(headers, "Expect:");
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, StreamCallback);
-}
-
-=======
->>>>>>> codex/add-openai-compatibility-adapter-to-aimaster-jt0i1p
 // ---- Send message to configured provider ----
 static bool sendMessageToOllama(const std::string& query,
                                 std::vector<Json::Value>& chatHistory,
@@ -264,6 +201,9 @@ static bool sendMessageToOllama(const std::string& query,
     setCurrentCommandSource(prev);
     route_output("[Thinking.....:-).......]", true);
     streamData.start_time = std::chrono::high_resolution_clock::now();
+
+    std::unique_ptr<StreamingTTSPlayer> tts_player;
+    if (config.tts_enabled) tts_player = std::make_unique<StreamingTTSPlayer>(config);
 
     ChatProviderResult providerResult;
     const bool ok = executeProviderChat(
@@ -284,6 +224,7 @@ static bool sendMessageToOllama(const std::string& query,
                 if (log.is_open()) { log << text; log.flush(); }
             }
             streamData.collected += text;
+            if (tts_player) tts_player->pushText(text);
         },
         [&](const std::string& line) {
             diag_log("%s\n", line.c_str());
@@ -293,6 +234,7 @@ static bool sendMessageToOllama(const std::string& query,
 
     route_output("", true);
     setCurrentCommandSource(prev);
+    if (tts_player) tts_player->finish();
 
     if (!ok) {
         route_output(std::string("[Error] ") + providerResult.error_message, true);
@@ -359,10 +301,24 @@ void SerialINT_HandleLine(const std::string& line, AppConfig& config) {
         route_output(modelPrompt(config, "> "), false);
         return;
     }
-        if (line == "/n") {
+    if (line == "/n") {
         g_serial_int_active.store(false, std::memory_order_relaxed);
         route_output(modelPrompt(config, "> "), false);
+        return;
     }
+
+    SpeakCommandResult speak;
+    if (applySpeakCommand(line, config, speak)) {
+        const std::string upper = toupper_copy(line);
+        if (upper == "/SPEAK ON" || upper == "/SPEAK OFF") {
+            if (saveConfig("config.txt", config)) speak.message += " (saved)";
+        }
+        route_output(speak.message, true);
+        route_output("-> ", false);
+        return;
+    }
+
+
     // Try RAG first (if active and enabled)
     std::string rag_answer;
     if (rag_int::TryRAGAnswer(line, rag_answer, /*k=*/config.rag_chunks, /*threshold=*/config.rag_threshold)) {
@@ -410,6 +366,21 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
         return ragOut; // handled RAG_INGEST / RAG_ASK / RAG_SESSION / etc
     }
 
+    Json::Value result;
+    const std::string cmd_upper = toupper_copy(command);
+
+    SpeakCommandResult speak;
+    if (applySpeakCommand(command, config, speak)) {
+        if (cmd_upper == "/SPEAK ON" || cmd_upper == "/SPEAK OFF") {
+            if (saveConfig("config.txt", config)) speak.message += " (saved)";
+        }
+        route_output(speak.message, true);
+        result["status"] = (cmd_upper == "/SPEAK ON" || cmd_upper == "/SPEAK OFF") ? "success" : "error";
+        result["tts_enabled"] = config.tts_enabled;
+        return result;
+    }
+
+
     // One-time Ollama connectivity status on first command
     if (!g_oc_ping_done) {
         g_oc_ping_done = true;
@@ -424,9 +395,6 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
     }
 
     static std::vector<Json::Value> chatHistory;
-    Json::Value result;
-
-    const std::string cmd_upper = toupper_copy(command);
 
     // ===== ASK =====
     if (cmd_upper == "ASK" || cmd_upper.rfind("ASK ", 0) == 0) {
@@ -513,6 +481,11 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
         result["ollama_timeout_seconds"] = Json::Value(static_cast<Json::UInt64>(config.ollama_timeout_seconds));
         result["rag_chunks"] = config.rag_chunks;
         result["rag_threshold"] = config.rag_threshold;
+        result["tts_enabled"] = config.tts_enabled;
+        result["tts_endpoint_url"] = config.tts_endpoint_url;
+        result["tts_timeout_seconds"] = Json::Value(static_cast<Json::UInt64>(config.tts_timeout_seconds));
+        result["tts_voice"] = config.tts_voice;
+        result["tts_speaker"] = config.tts_speaker;
         route_output("Current configuration:", true);
         route_output(std::string("\tSerial port: ") + config.serial_port, true);
         route_output(std::string("\tBaudrate: ") + std::to_string(config.baudrate), true);
@@ -564,6 +537,8 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
             cmds["INT"] = "Enter interactive mode with the model.";
             cmds["READ"] = "Send a file with context to the model.";
             cmds["RESET"] = "Clear chat history.";
+            cmds["/speak on"] = "Enable text-to-speech output for assistant replies.";
+            cmds["/speak off"] = "Disable text-to-speech output.";
             cmds["CFG"] = "Show current configuration.";
             cmds["HELP"] = "List available commands.";
             cmds["MODEL"] = "List or set Ollama model.";

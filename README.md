@@ -137,3 +137,81 @@ To switch to an OpenAI-compatible backend:
 Type `MODEL` to fetch available models from your configured upstream and interactively select one. The choice is persisted to `config.txt`.
 
 Execute `serial-passthru.bat` to pass the serial port from Windows to WSL, updating the batch file for your USB serial adapter IDs.
+
+## `/speak` text-to-speech
+
+AImaster now supports an additive local `/speak` command:
+
+- `/speak on` enables streaming text-to-speech playback for assistant replies sentence by sentence as text arrives.
+- `/speak off` disables text-to-speech playback.
+- Normal console output is unchanged; speech is played in addition to the printed response.
+- `/speak` is handled locally and is never sent to the LLM as chat content.
+
+When speech is enabled, AImaster now streams the assistant response into a background TTS queue as the LLM text arrives. Completed sentences are sent to the configured Quick-Piper-Endpoint `/speak` URL and played incrementally, so audio can begin before the full reply is finished without sounding as choppy as word-by-word playback. The client uses the streamed `play=0&stream_audio_chunks=1` flow for incremental playback, decoding each returned `audio_b64_wav` chunk, and still falls back to compatible raw WAV or JSON/base64 parsing when needed before attempting playback with the first available backend in this order:
+
+1. `paplay`
+2. `aplay`
+3. `ffplay`
+
+If speech synthesis, decoding, or playback fails, AImaster logs a concise warning and continues without interrupting the normal text flow.
+
+### TTS configuration
+
+These config keys are supported in `config.txt` and `config-example.txt`:
+
+```ini
+# Text-to-speech (disabled by default)
+tts_enabled=false
+tts_endpoint_url=http://127.0.0.1:8092/speak
+tts_timeout_seconds=10
+#tts_voice=en-us
+#tts_speaker=narrator
+```
+
+Environment overrides are also supported:
+
+- `AIMASTER_TTS_ENABLED`
+- `AIMASTER_TTS_ENDPOINT`
+- `AIMASTER_TTS_TIMEOUT_SECONDS`
+- `AIMASTER_TTS_VOICE`
+- `AIMASTER_TTS_SPEAKER`
+- `AIMASTER_TTS_BACKENDS` (comma-separated override such as `aplay,ffplay,paplay`)
+
+Request payloads follow the upstream examples by sending `text` (and `prompt` as a compatibility alias), plus optional `voice` and `speaker` values in the JSON body. The client appends `play=0&stream_audio_chunks=1` to the configured `/speak` URL so Quick-Piper can stream base64 WAV chunks for incremental playback; for resilience it also accepts direct WAV responses and compatible JSON/base64 fields such as `audio`, `audio_base64`, `wav_base64`, `audio_data`, and nested `data.*` variants.
+
+### Troubleshooting audio
+
+#### No audio heard
+
+- Confirm `/speak on` is enabled.
+- Confirm one of `paplay`, `aplay`, or `ffplay` is installed and available on `PATH`.
+- Check stderr for the selected playback backend or warning message.
+- Verify the endpoint returns playable WAV/base64 content.
+
+#### Endpoint connectivity
+
+- Verify `tts_endpoint_url` points to the running Quick-Piper endpoint.
+- Increase `tts_timeout_seconds` if synthesis is slow.
+- If needed, set `tts_voice` and `tts_speaker` to values accepted by your endpoint deployment.
+- If the endpoint is unavailable or returns invalid JSON, AImaster keeps the normal text reply and logs a warning instead of crashing.
+
+## Debian packaging and systemd service
+
+AImaster now includes a Debian packaging helper at `scripts/build_deb.sh`. It builds a `.deb` that installs:
+
+- the binary at `/usr/lib/aimaster/AImaster`
+- a service launcher at `/usr/lib/aimaster/aimaster-service.sh`
+- a systemd unit at `/usr/lib/systemd/system/aimaster.service`
+- default runtime assets at `/usr/share/aimaster/`
+
+The package's maintainer scripts create a dedicated `aimaster` system user/group, create `/var/lib/aimaster` and `/var/log/aimaster`, copy a default `config.txt` and `cmds.csv` into `/var/lib/aimaster` when missing, add the service user to `dialout`/`audio` when those groups exist, and enable/start the `aimaster.service` unit. The service unit also requests `SupplementaryGroups=audio dialout` and sets `AIMASTER_TTS_BACKENDS=aplay,ffplay,paplay` so the service account prefers direct ALSA playback instead of depending on a desktop PulseAudio session. To keep the interactive readline-based CLI alive under systemd, the package launches it through `/usr/lib/aimaster/aimaster-service.sh`, which allocates a PTY with `script(1)` and holds `/run/aimaster/input.fifo` open so the process does not exit on immediate EOF.
+
+Example build commands:
+
+```bash
+scripts/build_deb.sh
+scripts/build_deb.sh --version 1.0.0
+scripts/build_deb.sh --skip-build
+```
+
+The installed service runs system-wide under the dedicated `aimaster` account with `WorkingDirectory=/var/lib/aimaster`. If your deployment needs a different serial device path, provider URL, or TTS settings, edit `/var/lib/aimaster/config.txt` after installation and restart the service.

@@ -6,6 +6,7 @@
 #include <cctype>
 #include <iostream>
 #include <vector>
+#include <cstdlib>
 
 static inline void rtrim(std::string& s) { while (!s.empty() && std::isspace((unsigned char)s.back())) s.pop_back(); }
 static inline void ltrim(std::string& s) { size_t i=0; while (i<s.size() && std::isspace((unsigned char)s[i])) ++i; if (i) s.erase(0,i); }
@@ -22,6 +23,14 @@ static bool parse_long(const std::string& s, long& out) {
 static bool parse_double(const std::string& s, double& out) {
     try { size_t idx=0; double v=std::stod(s,&idx); if (idx!=s.size()) return false; out=v; return true; }
     catch(...) { return false; }
+}
+
+static bool parse_bool(const std::string& s, bool& out) {
+    std::string v = s;
+    std::transform(v.begin(), v.end(), v.begin(), [](unsigned char c){ return std::tolower(c); });
+    if (v=="1" || v=="true" || v=="yes" || v=="on") { out=true; return true; }
+    if (v=="0" || v=="false" || v=="no" || v=="off") { out=false; return true; }
+    return false;
 }
 
 static void parse_extra_header(const std::string& input, std::map<std::string,std::string>& out) {
@@ -87,6 +96,11 @@ bool loadConfig(const std::string& path, AppConfig& out) {
         else if (key == "temperature") { double v; if (parse_double(val, v)) out.temperature = v; }
         else if (key == "num_predict") { int v; if (parse_int(val, v) && v>0) out.num_predict = v; }
         else if (key == "format") out.format = val;
+        else if (key == "tts_endpoint_url") out.tts_endpoint_url = val;
+        else if (key == "tts_timeout_seconds") { long v; if (parse_long(val, v) && v > 0) out.tts_timeout_seconds = v; }
+        else if (key == "tts_voice") out.tts_voice = val;
+        else if (key == "tts_speaker") out.tts_speaker = val;
+        else if (key == "tts_enabled") { bool v; if (parse_bool(val, v)) out.tts_enabled = v; }
         else if (key == "extra_header") parse_extra_header(val, out.extra_headers);
         else if (key == "rag_chunks") { int v; if (parse_int(val, v) && v > 0) out.rag_chunks = v; }
         else if (key == "rag_threshold") { double v; if (parse_double(val, v) && v >= 0.0) out.rag_threshold = v; }
@@ -101,6 +115,12 @@ bool loadConfig(const std::string& path, AppConfig& out) {
 
         else { /* ignore unknown */ }
     }
+
+    if (const char* env = std::getenv("AIMASTER_TTS_ENABLED")) { bool v; if (parse_bool(env, v)) out.tts_enabled = v; }
+    if (const char* env = std::getenv("AIMASTER_TTS_ENDPOINT")) out.tts_endpoint_url = env;
+    if (const char* env = std::getenv("AIMASTER_TTS_TIMEOUT_SECONDS")) { long v; if (parse_long(env, v) && v > 0) out.tts_timeout_seconds = v; }
+    if (const char* env = std::getenv("AIMASTER_TTS_VOICE")) out.tts_voice = env;
+    if (const char* env = std::getenv("AIMASTER_TTS_SPEAKER")) out.tts_speaker = env;
 
     return true;
 }
@@ -127,6 +147,11 @@ bool saveConfig(const std::string& path, const AppConfig& cfg) {
     if (cfg.temperature >= 0.0) out << "temperature=" << cfg.temperature << "\n";
     if (cfg.num_predict > 0) out << "num_predict=" << cfg.num_predict << "\n";
     if (!cfg.format.empty()) out << "format=" << cfg.format << "\n";
+    out << "tts_enabled=" << (cfg.tts_enabled ? "true" : "false") << "\n";
+    out << "tts_endpoint_url=" << cfg.tts_endpoint_url << "\n";
+    out << "tts_timeout_seconds=" << cfg.tts_timeout_seconds << "\n";
+    if (!cfg.tts_voice.empty()) out << "tts_voice=" << cfg.tts_voice << "\n";
+    if (!cfg.tts_speaker.empty()) out << "tts_speaker=" << cfg.tts_speaker << "\n";
     for (const auto& kv : cfg.extra_headers) out << "extra_header=" << kv.first << ": " << kv.second << "\n";
     out << "rag_chunks=" << cfg.rag_chunks << "\n";
     out << "rag_threshold=" << cfg.rag_threshold << "\n";

@@ -1,0 +1,25 @@
+[Unit]
+Description=AImaster service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=aimaster
+Group=aimaster
+SupplementaryGroups=audio dialout
+Environment=AIMASTER_TTS_BACKENDS=aplay,ffplay,paplay
+WorkingDirectory=/var/lib/aimaster
+RuntimeDirectory=aimaster
+RuntimeDirectoryMode=0750
+ExecStart=/usr/lib/aimaster/aimaster-service.sh
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/aimaster /var/log/aimaster
+
+[Install]
+WantedBy=multi-user.target
