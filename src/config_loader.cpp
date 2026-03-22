@@ -101,6 +101,7 @@ bool loadConfig(const std::string& path, AppConfig& out) {
         else if (key == "tts_timeout_seconds") { long v; if (parse_long(val, v) && v > 0) out.tts_timeout_seconds = v; }
         else if (key == "tts_voice") out.tts_voice = val;
         else if (key == "tts_speaker") out.tts_speaker = val;
+        else if (key == "tts_output_device") out.tts_output_device = val;
         else if (key == "tts_enabled") { bool v; if (parse_bool(val, v)) out.tts_enabled = v; }
         else if (key == "extra_header") parse_extra_header(val, out.extra_headers);
         else if (key == "rag_chunks") { int v; if (parse_int(val, v) && v > 0) out.rag_chunks = v; }
@@ -122,6 +123,7 @@ bool loadConfig(const std::string& path, AppConfig& out) {
     if (const char* env = std::getenv("AIMASTER_TTS_TIMEOUT_SECONDS")) { long v; if (parse_long(env, v) && v > 0) out.tts_timeout_seconds = v; }
     if (const char* env = std::getenv("AIMASTER_TTS_VOICE")) out.tts_voice = env;
     if (const char* env = std::getenv("AIMASTER_TTS_SPEAKER")) out.tts_speaker = env;
+    if (const char* env = std::getenv("AIMASTER_TTS_OUTPUT_DEVICE")) out.tts_output_device = env;
 
     return true;
 }
@@ -154,6 +156,7 @@ bool saveConfig(const std::string& path, const AppConfig& cfg) {
     out << "tts_timeout_seconds=" << cfg.tts_timeout_seconds << "\n";
     if (!cfg.tts_voice.empty()) out << "tts_voice=" << cfg.tts_voice << "\n";
     if (!cfg.tts_speaker.empty()) out << "tts_speaker=" << cfg.tts_speaker << "\n";
+    if (!cfg.tts_output_device.empty()) out << "tts_output_device=" << cfg.tts_output_device << "\n";
     for (const auto& kv : cfg.extra_headers) out << "extra_header=" << kv.first << ": " << kv.second << "\n";
     out << "rag_chunks=" << cfg.rag_chunks << "\n";
     out << "rag_threshold=" << cfg.rag_threshold << "\n";

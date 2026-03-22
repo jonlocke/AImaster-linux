@@ -400,6 +400,12 @@ static std::string rtrim(std::string s){
 }
 static std::string trim(std::string s){ return rtrim(ltrim(s)); }
 
+static bool eq_ci(const std::string& a, const std::string& b){
+    if (a.size()!=b.size()) return false;
+    for (size_t i=0;i<a.size();++i) if (std::tolower((unsigned char)a[i])!=std::tolower((unsigned char)b[i])) return false;
+    return true;
+}
+
 // ================= Dispatcher =================
 Json::Value processCommand(const std::string& command, AppConfig& config) {
 
@@ -429,6 +435,65 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
         route_output(speak.message, true);
         result["status"] = (cmd_upper == "/SPEAK ON" || cmd_upper == "/SPEAK OFF") ? "success" : "error";
         result["tts_enabled"] = config.tts_enabled;
+        return result;
+    }
+    if (cmd_upper == "/SOUND" || cmd_upper.rfind("/SOUND ", 0) == 0) {
+        std::string arg = command.size() > 6 ? trim(command.substr(6)) : "";
+        std::string device_error;
+        auto devices = listPlaybackDevices(device_error);
+        Json::Value device_list(Json::arrayValue);
+        for (const auto& device : devices) {
+            Json::Value item(Json::objectValue);
+            item["id"] = device.id;
+            item["description"] = device.description;
+            item["default"] = device.is_default;
+            item["current"] = (device.id == config.tts_output_device);
+            device_list.append(item);
+        }
+        result["devices"] = device_list;
+
+        if (arg.empty()) {
+            route_output("Available sound output devices:", true);
+            for (size_t i = 0; i < devices.size(); ++i) {
+                std::string line = "  [" + std::to_string(i + 1) + "] " + devices[i].id + " - " + devices[i].description;
+                if (devices[i].is_default) line += " (default)";
+                if (devices[i].id == config.tts_output_device) line += " (current)";
+                route_output(line, true);
+            }
+            if (!device_error.empty()) route_output(std::string("[Warn] ") + device_error, true);
+            route_output("Use: /sound <#|device> to set the TTS output device.", true);
+            result["status"] = "success";
+            return result;
+        }
+
+        int idx = -1;
+        try { idx = std::stoi(arg); } catch (...) { idx = -1; }
+        std::string chosen;
+        if (idx >= 1 && idx <= (int)devices.size()) {
+            chosen = devices[idx - 1].id;
+        } else {
+            for (const auto& device : devices) {
+                if (device.id == arg || eq_ci(device.id, arg) || eq_ci(device.description, arg)) {
+                    chosen = device.id;
+                    break;
+                }
+            }
+        }
+
+        if (chosen.empty()) {
+            route_output(std::string("[Error] Sound device not found: ") + arg, true);
+            result["status"] = "error";
+            return result;
+        }
+
+        config.tts_output_device = chosen;
+        result["tts_output_device"] = chosen;
+        if (saveConfig("config.txt", config)) {
+            route_output(std::string("[OK] tts_output_device=") + chosen + " (saved)", true);
+        } else {
+            route_output(std::string("[OK] tts_output_device=") + chosen + " (save failed)", true);
+        }
+        result["status"] = "success";
         return result;
     }
 
@@ -539,6 +604,7 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
         result["tts_timeout_seconds"] = Json::Value(static_cast<Json::UInt64>(config.tts_timeout_seconds));
         result["tts_voice"] = config.tts_voice;
         result["tts_speaker"] = config.tts_speaker;
+        result["tts_output_device"] = config.tts_output_device;
         route_output("Current configuration:", true);
         route_output(std::string("\tSerial port: ") + config.serial_port, true);
         route_output(std::string("\tBaudrate: ") + std::to_string(config.baudrate), true);
@@ -551,6 +617,7 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
         route_output(std::string("\tRAG threshold (ASK/INT): ") + std::to_string(config.rag_threshold), true);
         route_output(std::string("\tChar delay: ") + std::to_string(config.serial_delay_ms), true);
         route_output(std::string("\tNewline: ") + config.serial_newline, true);
+        route_output(std::string("\tTTS output device: ") + config.tts_output_device, true);
         return result;
     }
     // ===== DELAY =====
@@ -591,6 +658,7 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
             cmds["/RESET"] = "Clear the UART screen and redraw the welcome banner.";
             cmds["/speak on"] = "Enable text-to-speech output for assistant replies.";
             cmds["/speak off"] = "Disable text-to-speech output.";
+            cmds["/sound"] = "List or set the TTS output device.";
             cmds["CFG"] = "Show current configuration.";
             cmds["HELP"] = "List available commands.";
             cmds["MODEL"] = "List or set Ollama model.";
@@ -659,11 +727,6 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
         if (idx >= 1 && idx <= (int)models.size()) {
             chosen = models[idx-1];
         } else {
-            auto eq_ci = [](const std::string& a, const std::string& b){
-                if (a.size()!=b.size()) return false;
-                for (size_t i=0;i<a.size();++i) if (std::tolower((unsigned char)a[i])!=std::tolower((unsigned char)b[i])) return false;
-                return true;
-            };
             for (auto& m : models) if (m == arg || eq_ci(m, arg)) { chosen = m; break; }
         }
 

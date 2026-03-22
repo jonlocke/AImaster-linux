@@ -164,6 +164,7 @@ These config keys are supported in `config.txt` and `config-example.txt`:
 tts_enabled=false
 tts_endpoint_url=http://127.0.0.1:8092/speak
 tts_timeout_seconds=10
+tts_output_device=plughw:0,0
 #tts_voice=en-us
 #tts_speaker=narrator
 ```
@@ -173,11 +174,12 @@ Environment overrides are also supported:
 - `AIMASTER_TTS_ENABLED`
 - `AIMASTER_TTS_ENDPOINT`
 - `AIMASTER_TTS_TIMEOUT_SECONDS`
+- `AIMASTER_TTS_OUTPUT_DEVICE`
 - `AIMASTER_TTS_VOICE`
 - `AIMASTER_TTS_SPEAKER`
 - `AIMASTER_TTS_BACKENDS` (comma-separated override such as `aplay,ffplay,paplay`)
 
-Request payloads follow the upstream examples by sending `text` (and `prompt` as a compatibility alias), plus optional `voice` and `speaker` values in the JSON body. The client appends `play=0&stream_audio_chunks=1` to the configured `/speak` URL so Quick-Piper can stream base64 WAV chunks for incremental playback; for resilience it also accepts direct WAV responses and compatible JSON/base64 fields such as `audio`, `audio_base64`, `wav_base64`, `audio_data`, and nested `data.*` variants.
+Request payloads follow the upstream examples by sending `text` (and `prompt` as a compatibility alias), plus optional `voice` and `speaker` values in the JSON body. The client appends `play=0&stream_audio_chunks=1` to the configured `/speak` URL so Quick-Piper can stream base64 WAV chunks for incremental playback; for resilience it also accepts direct WAV responses and compatible JSON/base64 fields such as `audio`, `audio_base64`, `wav_base64`, `audio_data`, and nested `data.*` variants. Use `/sound` to list ALSA playback devices and save a preferred `tts_output_device`; the default is `plughw:0,0`.
 
 ### Troubleshooting audio
 

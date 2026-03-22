@@ -40,6 +40,7 @@ struct AppConfig {
     long tts_timeout_seconds = 10;
     std::string tts_voice;
     std::string tts_speaker;
+    std::string tts_output_device = "plughw:0,0";
 
     // RAG retrieval defaults (used by ASK/INT when RAG is active)
     int rag_chunks = 25;

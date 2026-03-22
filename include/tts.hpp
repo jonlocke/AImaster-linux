@@ -21,6 +21,12 @@ struct TTSResponseAudio {
     std::string content_type;
 };
 
+struct PlaybackDevice {
+    std::string id;
+    std::string description;
+    bool is_default = false;
+};
+
 SpeakCommandResult parseSpeakCommand(const std::string& command);
 bool applySpeakCommand(const std::string& command, AppConfig& config, SpeakCommandResult& out);
 Json::Value buildTTSRequestPayload(const std::string& text, const AppConfig& config);
@@ -28,6 +34,7 @@ std::string buildTTSRequestUrl(const AppConfig& config);
 bool decodeBase64AudioResponse(const std::string& response_body,
                                TTSResponseAudio& out,
                                std::string& error);
+std::vector<PlaybackDevice> listPlaybackDevices(std::string& error);
 
 bool maybeSpeakText(const std::string& text, const AppConfig& config);
 

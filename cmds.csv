@@ -2,6 +2,7 @@ ASK,Ask the model a question and receive an answer - DEPRECATED USE INT instead.
 READ,Provide context and send the contents of a file to the model for absorption into the current chat.
 RESET,Clear the current chat history (useful to start a fresh conversation).
 /RESET,Clear the UART screen and redraw the welcome banner.
+/sound,List or set the TTS output device.
 CFG,Show current configuration information.
 HELP,List available commands.
 INT, Enter interactive mode - user /bye to exit.
