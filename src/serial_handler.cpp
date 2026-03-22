@@ -9,6 +9,7 @@
 #include <functional>
 #include <fstream>
 #include <sstream>
+#include <array>
 
 #include <libserialport.h>
 #include "serial_handler.h"
@@ -25,7 +26,7 @@ static std::thread serial_thread;
 static std::atomic<bool> serial_thread_running{false};
 static std::function<void(const std::string&)> line_callback = nullptr;
 static std::string rx_buffer;
-static std::string welcome_message_file = "assets/welcome.txt";
+static std::string welcome_message_file = "/usr/share/aimaster/welcome.txt";
 
 static int to_policy(const std::string& s) {
     std::string k; k.reserve(s.size());
@@ -51,21 +52,28 @@ void setWelcomeMessageFile(const std::string& path) {
 }
 
 static std::string load_welcome_message() {
-    std::ifstream in(welcome_message_file);
-    if (!in) {
-        return "Welcome to AImaster\n";
+    const std::array<std::string, 3> candidates = {
+        welcome_message_file,
+        "/usr/share/aimaster/welcome.txt",
+        "assets/welcome.txt"
+    };
+
+    for (const auto& candidate : candidates) {
+        if (candidate.empty()) continue;
+        std::ifstream in(candidate);
+        if (!in) continue;
+
+        std::ostringstream buffer;
+        buffer << in.rdbuf();
+        std::string message = buffer.str();
+        if (message.empty()) continue;
+        if (message.back() != '\n') {
+            message.push_back('\n');
+        }
+        return message;
     }
 
-    std::ostringstream buffer;
-    buffer << in.rdbuf();
-    std::string message = buffer.str();
-    if (message.empty()) {
-        return "Welcome to AImaster\n";
-    }
-    if (message.back() != '\n') {
-        message.push_back('\n');
-    }
-    return message;
+    return "Welcome to AImaster\n";
 }
 
 void serialResetTerminal() {

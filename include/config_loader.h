@@ -13,7 +13,7 @@ struct AppConfig {
 
     int serial_delay_ms = 50;
     std::string serial_newline = "CRLF"; // NEW: CRLF (default), LFCR, LF, CR
-    std::string welcome_message_file = "assets/welcome.txt";
+    std::string welcome_message_file = "/usr/share/aimaster/welcome.txt";
 
     // Ollama / provider compatibility
     std::string ollama_url = "http://localhost:11434";
