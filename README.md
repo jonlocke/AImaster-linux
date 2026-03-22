@@ -212,6 +212,9 @@ Example build commands:
 scripts/build_deb.sh
 scripts/build_deb.sh --version 1.0.0
 scripts/build_deb.sh --skip-build
+scripts/rebuild.sh
 ```
 
 The installed service runs system-wide under the dedicated `aimaster` account with `WorkingDirectory=/var/lib/aimaster`. If your deployment needs a different serial device path, provider URL, or TTS settings, edit `/var/lib/aimaster/config.txt` after installation and restart the service.
+
+For update/redeploy workflows, `scripts/rebuild.sh` fetches and pulls the latest refs, presents an interactive branch list (including the newest fetched branch), checks out the selected branch, rebuilds the Debian package with `scripts/build_deb.sh`, installs it, restores any existing `/var/lib/aimaster/config.txt`, and restarts `aimaster.service`.
