@@ -238,7 +238,15 @@ startSerialListener([&](const std::string& line) {
         
 //serialSend(modelPrompt(config, "> "));
 } else {
-            (void)execute_command(line, config, CommandSource::SERIAL);
+            Json::Value result = execute_command(line, config, CommandSource::SERIAL);
+            const bool prompt_emitted = result.get("prompt_emitted", false).asBool();
+            if (!prompt_emitted && !ReadAwait_IsActive()) {
+                if (SerialINT_IsActive()) {
+                    route_output("-> ", false);
+                } else {
+                    route_output(modelPrompt(config, "> "), false);
+                }
+            }
         }
     } catch (...) {
         std::cerr << "[Warning] exception in serial command handler\n";

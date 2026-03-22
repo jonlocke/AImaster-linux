@@ -289,8 +289,8 @@ bool SerialINT_IsActive() {
 void SerialINT_Start(AppConfig& config) {
     g_serial_int_active.store(true, std::memory_order_relaxed);
     diag_log("[DIAG] INT called from source=%d\n", (int)getCurrentCommandSource());
-    route_output("[Interactive Mode] Type your messages. Type /bye to exit.\n", true);
-    route_output("-> ");
+    route_output("[Interactive Mode] Type your messages. Type /bye to exit.", true);
+    route_output("-> ", false);
 }
 
 void SerialINT_HandleLine(const std::string& line, AppConfig& config) {
@@ -422,6 +422,7 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
     else if (cmd_upper == "INT") {
         SerialINT_Start(config);
         result["status"] = "success";
+        result["prompt_emitted"] = true;
         return result;
     }
     // ===== READ =====
@@ -498,7 +499,6 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
         route_output(std::string("\tRAG threshold (ASK/INT): ") + std::to_string(config.rag_threshold), true);
         route_output(std::string("\tChar delay: ") + std::to_string(config.serial_delay_ms), true);
         route_output(std::string("\tNewline: ") + config.serial_newline, true);
-        route_output("->", false);
         return result;
     }
     // ===== DELAY =====
@@ -521,7 +521,6 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
         } else {
             route_output(std::string("[OK] serial_delay_ms=") + std::to_string(ms) + " (save failed)", true);
         }
-        route_output("->", false);
         return Json::Value();
     }
     // ===== HELP =====
@@ -561,6 +560,7 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
             serialResetTerminal(config);
             result["status"] = "success";
             result["message"] = "UART terminal reset.";
+            result["prompt_emitted"] = true;
         } else {
             route_output("[Info] /RESET is only available over the serial terminal.", true);
             result["status"] = "error";
