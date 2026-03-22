@@ -558,7 +558,7 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
     // ===== /RESET =====
     else if (cmd_upper == "/RESET") {
         if (getCurrentCommandSource() == CommandSource::SERIAL) {
-            serialResetTerminal();
+            serialResetTerminal(config);
             result["status"] = "success";
             result["message"] = "UART terminal reset.";
         } else {

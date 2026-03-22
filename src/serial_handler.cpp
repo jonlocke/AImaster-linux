@@ -14,6 +14,8 @@
 #include <libserialport.h>
 #include "serial_handler.h"
 #include "io_sink.h"
+#include "config_loader.h"
+#include "ollama_client.h"
 
 bool serial_available = false;
 static sp_port* serial_port = nullptr;
@@ -76,7 +78,7 @@ static std::string load_welcome_message() {
     return "Welcome to AImaster\n";
 }
 
-void serialResetTerminal() {
+void serialResetTerminal(const AppConfig& config) {
     if (!serial_available || serial_port == nullptr) return;
     serialSend("\f");
     using namespace std::chrono_literals;
@@ -90,7 +92,11 @@ void serialResetTerminal() {
     serialSend("AImaster: Online\n");
     serialSend(": --> Type help for help!\n");
     serialSend("AImaster: AIinterface active\n\n");
-    emit_prompt();
+    if (SerialINT_IsActive()) {
+        serialSend("-> ");
+    } else {
+        serialSend(modelPrompt(config, "> "));
+    }
 }
 
 static bool set_port_config(sp_port* port_handle, int baudrate) {
@@ -123,7 +129,6 @@ bool initSerial(const std::string& port, int baudrate) {
     }
     serial_port = handle;
     serial_available = true;
-    serialResetTerminal();
     return true;
 }
 

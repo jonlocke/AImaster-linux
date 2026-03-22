@@ -222,6 +222,9 @@ setSerialSendDelay(config.serial_delay_ms);      // <- make sure this line exist
         std::cerr << "Warning: No serial port available. Using console mode." << std::endl;
     }
 if (serial_available) {
+serialResetTerminal(config);
+}
+if (serial_available) {
 startSerialListener([&](const std::string& line) {
     try {
                 setCurrentCommandSource(CommandSource::SERIAL);  // <-- add this line
