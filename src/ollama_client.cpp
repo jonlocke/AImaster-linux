@@ -184,6 +184,54 @@ namespace {
             pos = end + delimiter.length();
         }
     }
+
+    void writeThinkingStatusRaw(const std::string& text, bool use_serial) {
+        if (use_serial && serial_available) {
+            serialSend(text);
+        } else {
+            std::cout << text;
+            std::cout.flush();
+        }
+    }
+
+    class ThinkingSpinner {
+    public:
+        explicit ThinkingSpinner(bool use_serial) : use_serial_(use_serial) {}
+
+        void start() {
+            active_.store(true, std::memory_order_relaxed);
+            writeThinkingStatusRaw("[Thinking -]", use_serial_);
+            worker_ = std::thread([this]() {
+                static constexpr char frames[] = {'-', '/', '-', '\\'};
+                std::size_t idx = 1;
+                using namespace std::chrono_literals;
+                while (active_.load(std::memory_order_relaxed)) {
+                    std::this_thread::sleep_for(150ms);
+                    if (!active_.load(std::memory_order_relaxed)) break;
+                    std::string update = "\b\b";
+                    update.push_back(frames[idx]);
+                    update.push_back(']');
+                    writeThinkingStatusRaw(update, use_serial_);
+                    idx = (idx + 1) % 4;
+                }
+            });
+        }
+
+        void stop(bool newline) {
+            const bool was_active = active_.exchange(false, std::memory_order_relaxed);
+            if (worker_.joinable()) worker_.join();
+            if (was_active && newline) writeThinkingStatusRaw("\n", use_serial_);
+        }
+
+        ~ThinkingSpinner() {
+            stop(false);
+        }
+
+    private:
+        bool use_serial_ = false;
+        std::atomic<bool> active_{false};
+        std::thread worker_;
+    };
 }
 
 // ---- Send message to configured provider ----
@@ -199,7 +247,9 @@ static bool sendMessageToOllama(const std::string& query,
     StreamData streamData;
     const CommandSource prev = getCurrentCommandSource();
     setCurrentCommandSource(prev);
-    route_output("[Thinking.....:-).......]", true);
+    const bool use_serial_spinner = (prev == CommandSource::SERIAL);
+    ThinkingSpinner spinner(use_serial_spinner);
+    spinner.start();
     streamData.start_time = std::chrono::high_resolution_clock::now();
 
     std::unique_ptr<StreamingTTSPlayer> tts_player;
@@ -213,6 +263,7 @@ static bool sendMessageToOllama(const std::string& query,
         [&](const std::string& text) {
             if (!streamData.first_chunk_received) {
                 streamData.first_chunk_received = true;
+                spinner.stop(true);
                 auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::high_resolution_clock::now() - streamData.start_time
                 ).count();
@@ -232,6 +283,7 @@ static bool sendMessageToOllama(const std::string& query,
         providerResult
     );
 
+    if (!streamData.first_chunk_received) spinner.stop(true);
     route_output("", true);
     setCurrentCommandSource(prev);
     if (tts_player) tts_player->finish();
