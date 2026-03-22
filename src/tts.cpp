@@ -454,7 +454,6 @@ static bool speakTextNow(const std::string& text, const AppConfig& config) {
         }
     }
 
-    std::cerr << "[Info] TTS playback backend: " << backend_used << "\n";
     return true;
 }
 

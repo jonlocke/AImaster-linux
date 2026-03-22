@@ -185,7 +185,7 @@ Request payloads follow the upstream examples by sending `text` (and `prompt` as
 
 - Confirm `/speak on` is enabled.
 - Confirm one of `paplay`, `aplay`, or `ffplay` is installed and available on `PATH`.
-- Check stderr for the selected playback backend or warning message.
+- Check stderr for playback warnings or error messages.
 - Verify the endpoint returns playable WAV/base64 content.
 
 #### Endpoint connectivity
