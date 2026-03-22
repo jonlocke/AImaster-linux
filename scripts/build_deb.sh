@@ -83,11 +83,7 @@ Description: AImaster CLI with systemd service support
  optional local text-to-speech, and serial/RAG integrations.
 CONTROL
 
-cat > "$DEBIAN_DIR/conffiles" <<CONFFILES
-/var/lib/aimaster/config.txt
-CONFFILES
-
 find "$PKG_ROOT" -type d -exec chmod 0755 {} +
 
-dpkg-deb --build "$PKG_ROOT"
+dpkg-deb --root-owner-group --build "$PKG_ROOT"
 echo "Built package: ${PKG_ROOT}.deb"
