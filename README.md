@@ -197,6 +197,49 @@ Request payloads follow the upstream examples by sending `text` (and `prompt` as
 - If needed, set `tts_voice` and `tts_speaker` to values accepted by your endpoint deployment.
 - If the endpoint is unavailable or returns invalid JSON, AImaster keeps the normal text reply and logs a warning instead of crashing.
 
+## Microphone hotkey, transcription, and Bluetooth pairing
+
+AImaster now supports a Linux microphone toggle bound to a HID input button:
+
+- Use `/hid list` to inspect `/dev/input/event*` devices.
+- Use `/hid capture` and press the desired HID button once to bind it.
+- After binding, pressing that button toggles microphone recording on/off.
+- When recording stops, AImaster transcribes the captured audio, prints it as `mic: ...`, and sends it into the normal shared chat/RAG flow.
+- Use `/mic status`, `/mic on`, `/mic off`, or `/mic toggle` for manual control.
+
+Speech-to-text is intentionally backend-agnostic. Configure one of:
+
+```ini
+stt_command=whisper-cli -m /models/ggml-base.en.bin -f {audio} -otxt -nt
+```
+
+or:
+
+```ini
+stt_endpoint_url=http://127.0.0.1:8000/v1/audio/transcriptions
+stt_api_key=sk-example
+stt_model=whisper-1
+stt_timeout_seconds=60
+```
+
+Audio capture uses `arecord`, so ALSA capture support must be present. Optional mic config keys:
+
+```ini
+mic_record_device=plughw:1,0
+mic_sample_rate=16000
+mic_channels=1
+hid_input_device=/dev/input/event5
+hid_input_name=USB HID Device
+hid_button_code=115
+hid_debounce_ms=500
+```
+
+For Bluetooth device setup, `/pair` scans via `bluetoothctl` and lists nearby devices. Then run `/pair <#|MAC>` to pair, trust, and connect a speaker/headset/mic. Scan duration is configurable with:
+
+```ini
+bluetooth_scan_seconds=8
+```
+
 ## Debian packaging and systemd service
 
 AImaster now includes a Debian packaging helper at `scripts/build_deb.sh`. It builds a `.deb` that installs:

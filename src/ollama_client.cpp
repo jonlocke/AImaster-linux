@@ -7,6 +7,7 @@
 #include "utils.h"
 #include "chat_provider.hpp"
 #include "tts.hpp"
+#include "linux_integrations.hpp"
 
 #include <curl/curl.h>
 #include <algorithm>
@@ -18,6 +19,7 @@
 #include <cstdarg>
 #include <sstream>
 #include <memory>
+#include <mutex>
 #include <vector>
 #include "route_context.h"
 
@@ -309,6 +311,7 @@ static bool sendMessageToOllama(const std::string& query,
 // ================= Serial INT state =================
 static std::atomic<bool> g_serial_int_active{false};
 static std::vector<Json::Value> g_chatHistory;
+static std::mutex g_chatHistoryMutex;
 enum class ReadStage { Idle=0, WaitingContext, WaitingFilename, WaitingContextPresetFile, WaitingPickIndex_ContextKnown, WaitingPickIndex_ThenAskContext };
 static std::atomic<ReadStage> g_read_stage{ReadStage::Idle};
 static std::string g_read_context;
@@ -379,7 +382,10 @@ void SerialINT_HandleLine(const std::string& line, AppConfig& config) {
         return;
     }
     // Fall back to normal LLM
-    sendMessageToOllama(line, g_chatHistory, config);
+    {
+        std::lock_guard<std::mutex> lock(g_chatHistoryMutex);
+        sendMessageToOllama(line, g_chatHistory, config);
+    }
     route_output("-> ");
 }
 
@@ -511,8 +517,6 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
         }
     }
 
-    static std::vector<Json::Value> chatHistory;
-
     // ===== ASK =====
     if (cmd_upper == "ASK" || cmd_upper.rfind("ASK ", 0) == 0) {
         std::string query;
@@ -530,7 +534,8 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
             result["status"] = "success";
         } else {
             // Fall back to normal LLM
-            sendMessageToOllama(query, chatHistory, config);
+            std::lock_guard<std::mutex> lock(g_chatHistoryMutex);
+            sendMessageToOllama(query, g_chatHistory, config);
             result["status"] = "success";
         }
         return result;
@@ -581,7 +586,10 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
             "\n\nInstruction: Please read and store this content for later reference in our ongoing conversation. "
             "Acknowledge once you have absorbed it.";
 
-        sendMessageToOllama(fullMessage, chatHistory, config);
+        {
+            std::lock_guard<std::mutex> lock(g_chatHistoryMutex);
+            sendMessageToOllama(fullMessage, g_chatHistory, config);
+        }
         result["status"] = "success";
         return result;
     }
@@ -618,6 +626,10 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
         route_output(std::string("\tChar delay: ") + std::to_string(config.serial_delay_ms), true);
         route_output(std::string("\tNewline: ") + config.serial_newline, true);
         route_output(std::string("\tTTS output device: ") + config.tts_output_device, true);
+        route_output(std::string("\tSTT endpoint: ") + (config.stt_endpoint_url.empty() ? "<unset>" : config.stt_endpoint_url), true);
+        route_output(std::string("\tSTT model: ") + (config.stt_model.empty() ? "<unset>" : config.stt_model), true);
+        route_output(std::string("\tMic record device: ") + (config.mic_record_device.empty() ? "<default>" : config.mic_record_device), true);
+        route_output(std::string("\tMic HID binding: ") + micServiceStatus(config), true);
         return result;
     }
     // ===== DELAY =====
@@ -659,6 +671,9 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
             cmds["/speak on"] = "Enable text-to-speech output for assistant replies.";
             cmds["/speak off"] = "Disable text-to-speech output.";
             cmds["/sound"] = "List or set the TTS output device.";
+            cmds["/mic"] = "Control microphone recording and status.";
+            cmds["/hid"] = "List or capture the HID hotkey binding for microphone toggle.";
+            cmds["/pair"] = "Scan for Bluetooth devices, then pair/connect by number or MAC.";
             cmds["CFG"] = "Show current configuration.";
             cmds["HELP"] = "List available commands.";
             cmds["MODEL"] = "List or set Ollama model.";
@@ -686,6 +701,92 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
             result["status"] = "error";
             result["message"] = "/RESET is only available over the serial terminal.";
         }
+        return result;
+    }
+    // ===== /MIC =====
+    else if (cmd_upper == "/MIC" || cmd_upper.rfind("/MIC ", 0) == 0) {
+        const std::string arg = command.size() > 4 ? trim(command.substr(4)) : "";
+        std::string status;
+        bool ok = true;
+        if (arg.empty() || eq_ci(arg, "status")) {
+            status = "[Mic] " + micServiceStatus(config);
+        } else if (eq_ci(arg, "on") || eq_ci(arg, "start")) {
+            ok = startMicRecording(config, status);
+        } else if (eq_ci(arg, "off") || eq_ci(arg, "stop")) {
+            ok = stopMicRecording(config, status);
+        } else if (eq_ci(arg, "toggle")) {
+            ok = toggleMicRecording(config, status);
+        } else {
+            ok = false;
+            status = "Usage: /mic [status|on|off|toggle]";
+        }
+        route_output(status, true);
+        result["status"] = ok ? "success" : "error";
+        result["message"] = status;
+        return result;
+    }
+    // ===== /HID =====
+    else if (cmd_upper == "/HID" || cmd_upper.rfind("/HID ", 0) == 0) {
+        const std::string arg = command.size() > 4 ? trim(command.substr(4)) : "";
+        if (arg.empty() || eq_ci(arg, "status")) {
+            route_output("[HID] " + micServiceStatus(config), true);
+            result["status"] = "success";
+            return result;
+        }
+        if (eq_ci(arg, "list")) {
+            std::string error;
+            const auto devices = listInputDevices(error);
+            route_output("Input devices:", true);
+            for (size_t i = 0; i < devices.size(); ++i) {
+                route_output("  [" + std::to_string(i + 1) + "] " + devices[i].path + " - " + devices[i].name, true);
+            }
+            if (!error.empty()) route_output("[HID] " + error, true);
+            result["status"] = devices.empty() ? "error" : "success";
+            return result;
+        }
+        if (eq_ci(arg, "capture")) {
+            route_output("[HID] Press the target button now...", true);
+            HidCaptureResult capture;
+            std::string error;
+            if (!captureHidButton(config, capture, error)) {
+                route_output("[HID] " + error, true);
+                result["status"] = "error";
+                return result;
+            }
+            config.hid_input_device = capture.path;
+            config.hid_input_name = capture.name;
+            config.hid_button_code = capture.code;
+            const bool saved = saveConfig("config.txt", config);
+            std::string status;
+            configureMicHotkeyService(config, MicTranscriptCallback{}, status);
+            route_output("[HID] Bound microphone toggle to " + capture.path + " (" + capture.name +
+                         "), code " + std::to_string(capture.code) + (saved ? " (saved)" : " (save failed)"), true);
+            result["status"] = saved ? "success" : "error";
+            return result;
+        }
+        route_output("Usage: /hid [status|list|capture]", true);
+        result["status"] = "error";
+        return result;
+    }
+    // ===== /PAIR =====
+    else if (cmd_upper == "/PAIR" || cmd_upper.rfind("/PAIR ", 0) == 0) {
+        const std::string arg = command.size() > 5 ? trim(command.substr(5)) : "";
+        if (arg.empty()) {
+            route_output("[Bluetooth] Scanning...", true);
+            std::string error;
+            const auto devices = scanBluetoothDevices(config, error);
+            for (size_t i = 0; i < devices.size(); ++i) {
+                route_output("  [" + std::to_string(i + 1) + "] " + devices[i].mac + " - " + devices[i].name, true);
+            }
+            if (!error.empty()) route_output("[Bluetooth] " + error, true);
+            else route_output("Use: /pair <#|MAC>", true);
+            result["status"] = devices.empty() ? "error" : "success";
+            return result;
+        }
+        std::string status;
+        const bool ok = pairBluetoothDevice(config, arg, status);
+        route_output(status, true);
+        result["status"] = ok ? "success" : "error";
         return result;
     }
     // ===== MODEL (list & set) =====
@@ -765,7 +866,8 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
     }
     // ===== RESET =====
     else if (cmd_upper == "RESET") {
-        chatHistory.clear();
+        std::lock_guard<std::mutex> lock(g_chatHistoryMutex);
+        g_chatHistory.clear();
         result["status"] = "success";
         result["message"] = "Chat history cleared.";
         return result;
@@ -790,6 +892,23 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
     }
     return result;
 }
+
+void submitMicTranscript(const std::string& transcript, AppConfig& config) {
+    const std::string clean = trim(transcript);
+    if (clean.empty()) return;
+
+    route_output("mic: " + clean, true);
+
+    std::string rag_answer;
+    if (rag_int::TryRAGAnswer(clean, rag_answer, /*k=*/config.rag_chunks, /*threshold=*/config.rag_threshold)) {
+        route_output(rag_answer, true);
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(g_chatHistoryMutex);
+    sendMessageToOllama(clean, g_chatHistory, config);
+}
+
 bool ReadAwait_IsActive() { return g_read_stage.load(std::memory_order_relaxed) != ReadStage::Idle; }
 void ReadAwait_Start(AppConfig& config) { g_read_cfg = &config; g_read_context.clear(); g_read_preset_filename.clear(); g_read_stage.store(ReadStage::WaitingContext, std::memory_order_relaxed); route_output("Enter context:", true); if (getCurrentCommandSource() == CommandSource::SERIAL) route_output(": "); }
 void ReadAwait_StartWithFile(AppConfig& config, const std::string& filename) { g_read_cfg = &config; g_read_context.clear(); g_read_preset_filename = filename; g_read_stage.store(ReadStage::WaitingContextPresetFile, std::memory_order_relaxed); route_output("Enter context:", true); if (getCurrentCommandSource() == CommandSource::SERIAL) route_output(": "); }
@@ -811,7 +930,10 @@ void ReadAwait_HandleLine(const std::string& line, AppConfig& config) {
         if (!std::filesystem::exists(filename) || std::filesystem::is_empty(filename)) { route_output("[Error] Invalid file.", true); ReadAwait_Reset(); return; }
         std::ifstream inFile(filename); std::stringstream buffer; buffer << inFile.rdbuf(); std::string fileContents = buffer.str();
         std::string fullMessage = "Context: " + g_read_context + "\n\nFile contents:\n" + fileContents + "\n\nInstruction: Please read and store this content for later reference in our ongoing conversation. " "Acknowledge once you have absorbed it.";
-        sendMessageToOllama(fullMessage, g_chatHistory, config);
+        {
+            std::lock_guard<std::mutex> lock(g_chatHistoryMutex);
+            sendMessageToOllama(fullMessage, g_chatHistory, config);
+        }
         ReadAwait_Reset(); route_output(modelPrompt(config, SerialINT_IsActive() ? "-> " : "> ")); return;
     }
     if (st == ReadStage::WaitingContextPresetFile) {
@@ -821,7 +943,10 @@ void ReadAwait_HandleLine(const std::string& line, AppConfig& config) {
         if (!std::filesystem::exists(filename) || std::filesystem::is_empty(filename)) { route_output("[Error] Invalid file.", true); ReadAwait_Reset(); return; }
         std::ifstream inFile(filename); std::stringstream buffer; buffer << inFile.rdbuf(); std::string fileContents = buffer.str();
         std::string fullMessage = "Context: " + g_read_context + "\n\nFile contents:\n" + fileContents + "\n\nInstruction: Please read and store this content for later reference in our ongoing conversation. " "Acknowledge once you have absorbed it.";
-        sendMessageToOllama(fullMessage, g_chatHistory, config);
+        {
+            std::lock_guard<std::mutex> lock(g_chatHistoryMutex);
+            sendMessageToOllama(fullMessage, g_chatHistory, config);
+        }
         ReadAwait_Reset(); route_output(modelPrompt(config, SerialINT_IsActive() ? "-> " : "> ")); return;
     }
     if (st == ReadStage::WaitingPickIndex_ThenAskContext || st == ReadStage::WaitingPickIndex_ContextKnown) {
@@ -834,7 +959,10 @@ void ReadAwait_HandleLine(const std::string& line, AppConfig& config) {
         } else {
             std::ifstream inFile(filename); std::stringstream buffer; buffer << inFile.rdbuf(); std::string fileContents = buffer.str();
             std::string fullMessage = "Context: " + g_read_context + "\n\nFile contents:\n" + fileContents + "\n\nInstruction: Please read and store this content for later reference in our ongoing conversation. " "Acknowledge once you have absorbed it.";
-            sendMessageToOllama(fullMessage, g_chatHistory, config);
+            {
+                std::lock_guard<std::mutex> lock(g_chatHistoryMutex);
+                sendMessageToOllama(fullMessage, g_chatHistory, config);
+            }
             ReadAwait_Reset(); route_output(modelPrompt(config, SerialINT_IsActive() ? "-> " : "> ")); return;
         }
     }

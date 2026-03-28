@@ -103,6 +103,19 @@ bool loadConfig(const std::string& path, AppConfig& out) {
         else if (key == "tts_speaker") out.tts_speaker = val;
         else if (key == "tts_output_device") out.tts_output_device = val;
         else if (key == "tts_enabled") { bool v; if (parse_bool(val, v)) out.tts_enabled = v; }
+        else if (key == "mic_record_device") out.mic_record_device = val;
+        else if (key == "mic_sample_rate") { int v; if (parse_int(val, v) && v > 0) out.mic_sample_rate = v; }
+        else if (key == "mic_channels") { int v; if (parse_int(val, v) && v > 0) out.mic_channels = v; }
+        else if (key == "stt_endpoint_url") out.stt_endpoint_url = val;
+        else if (key == "stt_api_key") out.stt_api_key = val;
+        else if (key == "stt_model") out.stt_model = val;
+        else if (key == "stt_timeout_seconds") { long v; if (parse_long(val, v) && v > 0) out.stt_timeout_seconds = v; }
+        else if (key == "stt_command") out.stt_command = val;
+        else if (key == "hid_input_device") out.hid_input_device = val;
+        else if (key == "hid_input_name") out.hid_input_name = val;
+        else if (key == "hid_button_code") { int v; if (parse_int(val, v) && v >= 0) out.hid_button_code = v; }
+        else if (key == "hid_debounce_ms") { int v; if (parse_int(val, v) && v >= 0) out.hid_debounce_ms = v; }
+        else if (key == "bluetooth_scan_seconds") { int v; if (parse_int(val, v) && v > 0) out.bluetooth_scan_seconds = v; }
         else if (key == "extra_header") parse_extra_header(val, out.extra_headers);
         else if (key == "rag_chunks") { int v; if (parse_int(val, v) && v > 0) out.rag_chunks = v; }
         else if (key == "rag_threshold") { double v; if (parse_double(val, v) && v >= 0.0) out.rag_threshold = v; }
@@ -157,6 +170,19 @@ bool saveConfig(const std::string& path, const AppConfig& cfg) {
     if (!cfg.tts_voice.empty()) out << "tts_voice=" << cfg.tts_voice << "\n";
     if (!cfg.tts_speaker.empty()) out << "tts_speaker=" << cfg.tts_speaker << "\n";
     if (!cfg.tts_output_device.empty()) out << "tts_output_device=" << cfg.tts_output_device << "\n";
+    if (!cfg.mic_record_device.empty()) out << "mic_record_device=" << cfg.mic_record_device << "\n";
+    out << "mic_sample_rate=" << cfg.mic_sample_rate << "\n";
+    out << "mic_channels=" << cfg.mic_channels << "\n";
+    if (!cfg.stt_endpoint_url.empty()) out << "stt_endpoint_url=" << cfg.stt_endpoint_url << "\n";
+    if (!cfg.stt_api_key.empty()) out << "stt_api_key=" << cfg.stt_api_key << "\n";
+    if (!cfg.stt_model.empty()) out << "stt_model=" << cfg.stt_model << "\n";
+    out << "stt_timeout_seconds=" << cfg.stt_timeout_seconds << "\n";
+    if (!cfg.stt_command.empty()) out << "stt_command=" << cfg.stt_command << "\n";
+    if (!cfg.hid_input_device.empty()) out << "hid_input_device=" << cfg.hid_input_device << "\n";
+    if (!cfg.hid_input_name.empty()) out << "hid_input_name=" << cfg.hid_input_name << "\n";
+    if (cfg.hid_button_code >= 0) out << "hid_button_code=" << cfg.hid_button_code << "\n";
+    out << "hid_debounce_ms=" << cfg.hid_debounce_ms << "\n";
+    out << "bluetooth_scan_seconds=" << cfg.bluetooth_scan_seconds << "\n";
     for (const auto& kv : cfg.extra_headers) out << "extra_header=" << kv.first << ": " << kv.second << "\n";
     out << "rag_chunks=" << cfg.rag_chunks << "\n";
     out << "rag_threshold=" << cfg.rag_threshold << "\n";

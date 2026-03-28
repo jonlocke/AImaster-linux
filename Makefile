@@ -11,6 +11,7 @@ OBJS = \
   src/serial_handler.o \
   src/chat_provider.o \
   src/ollama_client.o \
+  src/linux_integrations.o \
   src/tts.o \
   src/rag_session.o \
   src/rag_adapter.o \

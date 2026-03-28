@@ -28,3 +28,6 @@ void ReadAwait_StartFolderPickThenAskContext(AppConfig& config, const std::strin
 void ReadAwait_HandleLine(const std::string& line, AppConfig& config);
 
 bool ReadAwait_TryHandleLine(const std::string& line, AppConfig& config);
+
+// Inject a transcribed microphone turn into the shared conversation.
+void submitMicTranscript(const std::string& transcript, AppConfig& config);

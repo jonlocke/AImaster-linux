@@ -42,6 +42,21 @@ struct AppConfig {
     std::string tts_speaker;
     std::string tts_output_device = "plughw:0,0";
 
+    // Microphone / speech-to-text
+    std::string mic_record_device;
+    int mic_sample_rate = 16000;
+    int mic_channels = 1;
+    std::string stt_endpoint_url;
+    std::string stt_api_key;
+    std::string stt_model;
+    long stt_timeout_seconds = 60;
+    std::string stt_command;
+    std::string hid_input_device;
+    std::string hid_input_name;
+    int hid_button_code = -1;
+    int hid_debounce_ms = 500;
+    int bluetooth_scan_seconds = 8;
+
     // RAG retrieval defaults (used by ASK/INT when RAG is active)
     int rag_chunks = 25;
     double rag_threshold = 0.2;

@@ -19,6 +19,7 @@
 #include "rag_int_bridge.hpp"
 #include "io_sink.h"
 #include "route_context.h"
+#include "linux_integrations.hpp"
 
 
 
@@ -263,6 +264,13 @@ startSerialListener([&](const std::string& line) {
     read_history(histFile.c_str());
 
     std::cout << "\033[38;2;255;215;0mAImaster CLI\033[0m\n\033[38;2;255;239;184mType HELP for a list of commands.\033[0m\n";
+    {
+        std::string mic_status;
+        configureMicHotkeyService(config, [&](const std::string& transcript) {
+            submitMicTranscript(transcript, config);
+        }, mic_status);
+        if (!mic_status.empty()) std::cout << mic_status << std::endl;
+    }
 
     while (true) {
         std::string prompt;
@@ -322,6 +330,7 @@ startSerialListener([&](const std::string& line) {
 
     // Save history on exit
     write_history(histFile.c_str());
+    stopMicHotkeyService();
 
     return 0;
 }

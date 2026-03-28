@@ -32,3 +32,23 @@ tts_timeout_seconds=10
 tts_output_device=plughw:0,0
 #tts_voice=en-us
 #tts_speaker=narrator
+
+# Speech-to-text / microphone hotkey
+#mic_record_device=plughw:1,0
+mic_sample_rate=16000
+mic_channels=1
+# Use either a local transcription command or an HTTP endpoint.
+#stt_command=whisper-cli -m /models/ggml-base.en.bin -f {audio} -otxt -nt
+#stt_endpoint_url=http://127.0.0.1:8000/v1/audio/transcriptions
+#stt_api_key=sk-example
+#stt_model=whisper-1
+stt_timeout_seconds=60
+
+# HID button binding for microphone toggle. Use /hid capture to populate these.
+#hid_input_device=/dev/input/event5
+#hid_input_name=USB HID Device
+#hid_button_code=115
+hid_debounce_ms=500
+
+# Bluetooth pairing helper. /pair scans, then /pair <#|MAC> pairs/connects.
+bluetooth_scan_seconds=8
