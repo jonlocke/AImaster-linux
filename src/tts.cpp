@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <set>
@@ -132,16 +133,145 @@ bool writeAudioTempFile(const std::vector<unsigned char>& audio, std::string& ou
     return true;
 }
 
-bool runShellPlayback(const std::string& command, std::string& error) {
+struct PersistentBluealsaPlayer {
+    std::mutex mutex;
+    std::string device;
+    pid_t pid = -1;
+    int stdin_fd = -1;
+};
+
+PersistentBluealsaPlayer g_bluealsa_player;
+
+void stopPersistentBluealsaPlayerLocked() {
+    if (g_bluealsa_player.stdin_fd >= 0) {
+        ::close(g_bluealsa_player.stdin_fd);
+        g_bluealsa_player.stdin_fd = -1;
+    }
+    if (g_bluealsa_player.pid > 0) {
+        int status = 0;
+        ::waitpid(g_bluealsa_player.pid, &status, 0);
+        g_bluealsa_player.pid = -1;
+    }
+    g_bluealsa_player.device.clear();
+}
+
+bool ensurePersistentBluealsaPlayer(const std::string& aplay_exe,
+                                    const std::string& device,
+                                    std::string& command_for_log,
+                                    std::string& error) {
+    std::lock_guard<std::mutex> lock(g_bluealsa_player.mutex);
+    if (g_bluealsa_player.stdin_fd >= 0 && g_bluealsa_player.device == device) {
+        command_for_log = aplay_exe + " -q -D " + device +
+                          " --buffer-size=262144 --period-size=4096 -t raw -f S16_LE -r 44100 -c 2";
+        return true;
+    }
+
+    stopPersistentBluealsaPlayerLocked();
+
+    int pipefd[2];
+    if (::pipe(pipefd) != 0) {
+        error = std::string("pipe failed: ") + std::strerror(errno);
+        return false;
+    }
+
+    command_for_log = aplay_exe + " -q -D " + device +
+                      " --buffer-size=262144 --period-size=4096 -t raw -f S16_LE -r 44100 -c 2";
+
     pid_t pid = ::fork();
     if (pid < 0) {
+        ::close(pipefd[0]);
+        ::close(pipefd[1]);
         error = std::string("fork failed: ") + std::strerror(errno);
         return false;
     }
     if (pid == 0) {
-        ::execl("/bin/sh", "sh", "-lc", command.c_str(), static_cast<char*>(nullptr));
+        ::dup2(pipefd[0], STDIN_FILENO);
+        ::close(pipefd[0]);
+        ::close(pipefd[1]);
+        std::vector<char*> args;
+        std::vector<std::string> argv = {
+            aplay_exe, "-q", "-D", device,
+            "--buffer-size=262144", "--period-size=4096",
+            "-t", "raw", "-f", "S16_LE", "-r", "44100", "-c", "2"
+        };
+        for (auto& arg : argv) args.push_back(arg.data());
+        args.push_back(nullptr);
+        ::execv(aplay_exe.c_str(), args.data());
         _exit(127);
     }
+
+    ::close(pipefd[0]);
+    g_bluealsa_player.pid = pid;
+    g_bluealsa_player.stdin_fd = pipefd[1];
+    g_bluealsa_player.device = device;
+    return true;
+}
+
+bool writeToPersistentBluealsaPlayer(const std::vector<unsigned char>& pcm,
+                                     const std::string& aplay_exe,
+                                     const std::string& device,
+                                     std::string& command_for_log,
+                                     std::string& error) {
+    if (!ensurePersistentBluealsaPlayer(aplay_exe, device, command_for_log, error)) return false;
+
+    std::lock_guard<std::mutex> lock(g_bluealsa_player.mutex);
+    size_t offset = 0;
+    while (offset < pcm.size()) {
+        ssize_t written = ::write(g_bluealsa_player.stdin_fd, pcm.data() + offset, pcm.size() - offset);
+        if (written <= 0) {
+            error = std::string("write failed: ") + std::strerror(errno);
+            stopPersistentBluealsaPlayerLocked();
+            return false;
+        }
+        offset += static_cast<size_t>(written);
+    }
+    return true;
+}
+
+bool runAndCaptureBinary(const std::vector<std::string>& argv,
+                         std::vector<unsigned char>& out,
+                         std::string& error) {
+    int pipefd[2];
+    if (::pipe(pipefd) != 0) {
+        error = std::string("pipe failed: ") + std::strerror(errno);
+        return false;
+    }
+
+    pid_t pid = ::fork();
+    if (pid < 0) {
+        ::close(pipefd[0]);
+        ::close(pipefd[1]);
+        error = std::string("fork failed: ") + std::strerror(errno);
+        return false;
+    }
+
+    if (pid == 0) {
+        ::dup2(pipefd[1], STDOUT_FILENO);
+        ::close(pipefd[0]);
+        ::close(pipefd[1]);
+        std::vector<char*> args;
+        for (const auto& arg : argv) args.push_back(const_cast<char*>(arg.c_str()));
+        args.push_back(nullptr);
+        ::execv(argv[0].c_str(), args.data());
+        _exit(127);
+    }
+
+    ::close(pipefd[1]);
+    out.clear();
+    unsigned char buffer[8192];
+    for (;;) {
+        ssize_t n = ::read(pipefd[0], buffer, sizeof(buffer));
+        if (n == 0) break;
+        if (n < 0) {
+            ::close(pipefd[0]);
+            int status = 0;
+            ::waitpid(pid, &status, 0);
+            error = std::string("read failed: ") + std::strerror(errno);
+            return false;
+        }
+        out.insert(out.end(), buffer, buffer + n);
+    }
+    ::close(pipefd[0]);
 
     int status = 0;
     if (::waitpid(pid, &status, 0) < 0) {
@@ -150,7 +280,7 @@ bool runShellPlayback(const std::string& command, std::string& error) {
     }
     if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
         std::ostringstream oss;
-        oss << "player exited with status " << (WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+        oss << "command exited with status " << (WIFEXITED(status) ? WEXITSTATUS(status) : -1);
         error = oss.str();
         return false;
     }
@@ -235,16 +365,6 @@ std::string formatCommandForLog(const std::vector<std::string>& argv) {
     return oss.str();
 }
 
-std::string shellEscape(const std::string& arg) {
-    std::string out = "'";
-    for (char ch : arg) {
-        if (ch == '\'') out += "'\\''";
-        else out.push_back(ch);
-    }
-    out.push_back('\'');
-    return out;
-}
-
 bool playAudioBytes(const std::vector<unsigned char>& audio, const AppConfig& config, std::string& backend_used, std::string& error) {
     std::string path;
     if (!writeAudioTempFile(audio, path, error)) return false;
@@ -252,8 +372,8 @@ bool playAudioBytes(const std::vector<unsigned char>& audio, const AppConfig& co
     struct Backend {
         const char* name;
         std::vector<std::string> args;
-        std::string shell_command;
-        bool use_shell = false;
+        std::string device;
+        bool persistent_bluealsa = false;
     };
 
     std::vector<Backend> backends;
@@ -278,14 +398,7 @@ bool playAudioBytes(const std::vector<unsigned char>& audio, const AppConfig& co
         else if (name == "aplay") {
             const std::string playback_device = trim_copy(config.tts_output_device);
             if (playback_device.rfind("bluealsa:", 0) == 0) {
-                std::string ffmpeg_exe;
-                if (!findExecutable("ffmpeg", ffmpeg_exe)) continue;
-                const std::string shell_command =
-                    shellEscape(ffmpeg_exe) + " -i " + shellEscape(path) +
-                    " -ar 44100 -ac 2 -sample_fmt s16 -f wav - | " +
-                    shellEscape(exe) + " -q -D " + shellEscape(playback_device) +
-                    " --buffer-size=262144 --period-size=4096";
-                backends.push_back({"aplay", {}, shell_command, true});
+                backends.push_back({"aplay", {exe}, playback_device, true});
                 continue;
             }
             std::vector<std::string> args{exe, "-q"};
@@ -312,11 +425,33 @@ bool playAudioBytes(const std::vector<unsigned char>& audio, const AppConfig& co
 
     for (const auto& backend : backends) {
         std::string backend_error;
-        const std::string command_for_log = backend.use_shell ? backend.shell_command : formatCommandForLog(backend.args);
+        std::string command_for_log = formatCommandForLog(backend.args);
+        bool ok = false;
+        if (backend.persistent_bluealsa) {
+            std::string ffmpeg_exe;
+            if (!findExecutable("ffmpeg", ffmpeg_exe)) {
+                error = "ffmpeg not found for BlueALSA playback";
+                ::unlink(path.c_str());
+                return false;
+            }
+            std::vector<unsigned char> pcm;
+            const std::vector<std::string> ffmpeg_args = {
+                ffmpeg_exe, "-v", "error", "-i", path,
+                "-ar", "44100", "-ac", "2", "-sample_fmt", "s16",
+                "-f", "s16le", "-"
+            };
+            const std::string ffmpeg_log = formatCommandForLog(ffmpeg_args);
+            if (!runAndCaptureBinary(ffmpeg_args, pcm, backend_error)) {
+                error = "ffmpeg: " + backend_error + " | cmd: " + ffmpeg_log;
+                ::unlink(path.c_str());
+                return false;
+            }
+            ok = writeToPersistentBluealsaPlayer(pcm, backend.args[0], backend.device, command_for_log, backend_error);
+        } else {
+            command_for_log = formatCommandForLog(backend.args);
+            ok = runPlayback(backend.args, backend_error);
+        }
         std::cerr << "[Info] TTS playback command: " << command_for_log << "\n";
-        const bool ok = backend.use_shell
-            ? runShellPlayback(backend.shell_command, backend_error)
-            : runPlayback(backend.args, backend_error);
         if (ok) {
             backend_used = backend.name;
             ::unlink(path.c_str());
@@ -606,6 +741,8 @@ StreamingTTSPlayer::StreamingTTSPlayer(const AppConfig& config) : config_(config
 
 StreamingTTSPlayer::~StreamingTTSPlayer() {
     finish();
+    std::lock_guard<std::mutex> lock(g_bluealsa_player.mutex);
+    stopPersistentBluealsaPlayerLocked();
 }
 
 void StreamingTTSPlayer::pushText(const std::string& text) {
