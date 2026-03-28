@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=simple
 User=aimaster
 Group=aimaster
-SupplementaryGroups=audio dialout
+SupplementaryGroups=audio dialout plugdev
 Environment=AIMASTER_TTS_BACKENDS=aplay,ffplay,paplay
 WorkingDirectory=/var/lib/aimaster
 RuntimeDirectory=aimaster

@@ -26,6 +26,9 @@ case "$1" in
     if getent group audio >/dev/null; then
       adduser aimaster audio >/dev/null 2>&1 || true
     fi
+    if getent group plugdev >/dev/null; then
+      adduser aimaster plugdev >/dev/null 2>&1 || true
+    fi
 
     systemctl daemon-reload >/dev/null 2>&1 || true
     systemctl enable aimaster.service >/dev/null 2>&1 || true
