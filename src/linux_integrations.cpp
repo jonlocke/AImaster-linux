@@ -2,6 +2,7 @@
 
 #include "config_loader.h"
 #include "command_exec.h"
+#include "ollama_client.h"
 
 #include <curl/curl.h>
 #include <fcntl.h>
@@ -128,6 +129,26 @@ bool has_bluealsa_pcm(const std::string& device_id, bool want_capture) {
         return want_capture ? pcm.capture : pcm.playback;
     }
     return false;
+}
+
+void diag_log_bluealsa_capture_state(const std::string& selected_device) {
+    if (!IsDiagnosticModeEnabled()) return;
+    std::fprintf(stderr, "[DIAG] mic selected device: %s\n", selected_device.c_str());
+    const auto pcms = list_bluealsa_pcms();
+    if (pcms.empty()) {
+        std::fprintf(stderr, "[DIAG] mic live bluealsa capture devices: <none>\n");
+        std::fflush(stderr);
+        return;
+    }
+    bool any_capture = false;
+    for (const auto& pcm : pcms) {
+        if (!pcm.capture) continue;
+        any_capture = true;
+        std::fprintf(stderr, "[DIAG] mic live bluealsa capture: %s | %s\n",
+                     pcm.id.c_str(), pcm.description.c_str());
+    }
+    if (!any_capture) std::fprintf(stderr, "[DIAG] mic live bluealsa capture devices: <none>\n");
+    std::fflush(stderr);
 }
 
 static size_t curl_write_string(void* contents, size_t size, size_t nmemb, void* userp) {
@@ -310,6 +331,7 @@ bool start_recording_locked(AppConfig& config, std::string& status) {
     if (!config.mic_record_device.empty() &&
         config.mic_record_device.rfind("bluealsa:", 0) == 0 &&
         !has_bluealsa_pcm(config.mic_record_device, true)) {
+        diag_log_bluealsa_capture_state(config.mic_record_device);
         status = "[Mic] Selected Bluetooth microphone is not available. Reconnect it and make sure headset/SCO mode is active.";
         return false;
     }
