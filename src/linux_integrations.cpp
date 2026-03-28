@@ -131,6 +131,7 @@ std::string resolve_transcript_text(const std::string& response) {
     std::string errs;
     std::istringstream iss(trimmed);
     if (Json::parseFromStream(builder, iss, &root, &errs) && root.isObject()) {
+        if (root.isMember("error")) return {};
         if (root.isMember("text") && root["text"].isString()) return trim_copy(root["text"].asString());
         if (root.isMember("transcript") && root["transcript"].isString()) return trim_copy(root["transcript"].asString());
     }
@@ -217,6 +218,16 @@ std::string transcribe_via_http(const AppConfig& config, const std::string& audi
     }
     if (http_code < 200 || http_code >= 300) {
         error = "STT HTTP " + std::to_string(http_code) + ": " + trim_copy(response);
+        return {};
+    }
+
+    Json::CharReaderBuilder builder;
+    Json::Value root;
+    std::string errs;
+    std::istringstream iss(response);
+    if (Json::parseFromStream(builder, iss, &root, &errs) && root.isObject() && root.isMember("error")) {
+        if (root["error"].isString()) error = trim_copy(root["error"].asString());
+        else error = trim_copy(response);
         return {};
     }
 
