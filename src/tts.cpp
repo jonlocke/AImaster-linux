@@ -181,6 +181,15 @@ std::vector<std::string> playbackBackendOrder() {
     return order;
 }
 
+bool deviceRequiresExplicitAlsaRouting(const AppConfig& config) {
+    if (config.tts_output_device.empty()) return false;
+    const std::string device = trim_copy(config.tts_output_device);
+    if (device.empty()) return false;
+    if (device == "default") return false;
+    if (device == "plughw:0,0") return false;
+    return true;
+}
+
 bool playAudioBytes(const std::vector<unsigned char>& audio, const AppConfig& config, std::string& backend_used, std::string& error) {
     std::string path;
     if (!writeAudioTempFile(audio, path, error)) return false;
@@ -192,10 +201,23 @@ bool playAudioBytes(const std::vector<unsigned char>& audio, const AppConfig& co
 
     std::vector<Backend> backends;
     std::string exe;
-    const auto order = playbackBackendOrder();
+    auto order = playbackBackendOrder();
+    if (deviceRequiresExplicitAlsaRouting(config)) {
+        std::stable_sort(order.begin(), order.end(), [](const std::string& a, const std::string& b) {
+            auto rank = [](const std::string& name) {
+                if (name == "aplay") return 0;
+                if (name == "paplay") return 1;
+                return 2;
+            };
+            return rank(a) < rank(b);
+        });
+    }
     for (const auto& name : order) {
         if (!findExecutable(name, exe)) continue;
-        if (name == "paplay") backends.push_back({"paplay", {exe, path}});
+        if (name == "paplay") {
+            if (deviceRequiresExplicitAlsaRouting(config)) continue;
+            backends.push_back({"paplay", {exe, path}});
+        }
         else if (name == "aplay") {
             std::vector<std::string> args{exe, "-q"};
             if (!config.tts_output_device.empty()) {
@@ -205,12 +227,17 @@ bool playAudioBytes(const std::vector<unsigned char>& audio, const AppConfig& co
             args.push_back(path);
             backends.push_back({"aplay", std::move(args)});
         }
-        else if (name == "ffplay") backends.push_back({"ffplay", {exe, "-nodisp", "-autoexit", "-loglevel", "error", path}});
+        else if (name == "ffplay") {
+            if (deviceRequiresExplicitAlsaRouting(config)) continue;
+            backends.push_back({"ffplay", {exe, "-nodisp", "-autoexit", "-loglevel", "error", path}});
+        }
     }
 
     if (backends.empty()) {
         ::unlink(path.c_str());
-        error = "no playback backend found (tried paplay, aplay, ffplay)";
+        error = deviceRequiresExplicitAlsaRouting(config)
+            ? "no playback backend found that supports the selected ALSA/Bluetooth output device"
+            : "no playback backend found (tried paplay, aplay, ffplay)";
         return false;
     }
 
