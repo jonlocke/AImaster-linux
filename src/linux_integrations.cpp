@@ -180,7 +180,9 @@ std::string transcribe_via_http(const AppConfig& config, const std::string& audi
     curl_mime_name(part, "file");
     curl_mime_filedata(part, audio_path.c_str());
 
-    if (!config.stt_model.empty()) {
+    const bool quick_stt_endpoint = config.stt_endpoint_url.find("/inference") != std::string::npos;
+
+    if (!quick_stt_endpoint && !config.stt_model.empty()) {
         part = curl_mime_addpart(mime);
         curl_mime_name(part, "model");
         curl_mime_data(part, config.stt_model.c_str(), CURL_ZERO_TERMINATED);
@@ -188,7 +190,17 @@ std::string transcribe_via_http(const AppConfig& config, const std::string& audi
 
     part = curl_mime_addpart(mime);
     curl_mime_name(part, "response_format");
-    curl_mime_data(part, "text", CURL_ZERO_TERMINATED);
+    curl_mime_data(part, quick_stt_endpoint ? "json" : "text", CURL_ZERO_TERMINATED);
+
+    if (quick_stt_endpoint) {
+        part = curl_mime_addpart(mime);
+        curl_mime_name(part, "temperature");
+        curl_mime_data(part, "0.0", CURL_ZERO_TERMINATED);
+
+        part = curl_mime_addpart(mime);
+        curl_mime_name(part, "temperature_inc");
+        curl_mime_data(part, "0.2", CURL_ZERO_TERMINATED);
+    }
 
     curl_easy_setopt(curl, CURLOPT_MIMEPOST, mime);
     CURLcode res = curl_easy_perform(curl);
