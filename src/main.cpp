@@ -21,6 +21,8 @@
 #include "route_context.h"
 #include "linux_integrations.hpp"
 #include "hid_button.h"
+#include <atomic>
+#include <thread>
 
 
 
@@ -29,6 +31,8 @@
 namespace fs = std::filesystem;
 static const char* HISTORY_FILE = "~/.ollama_cli_history";
 static AppConfig* g_main_config = nullptr;
+static std::atomic<bool> g_button_thread_stop{false};
+static std::thread g_button_thread;
 
 
 
@@ -183,25 +187,34 @@ char** custom_completion(const char* text, int start, int end) {
     return nullptr;
 }
 
-static int button_event_hook() {
-    static auto last_poll = std::chrono::steady_clock::time_point::min();
-    const auto now = std::chrono::steady_clock::now();
-    if (now - last_poll < std::chrono::milliseconds(20)) return 0;
-    last_poll = now;
-    if (!SerialINT_IsActive() || !ButtonMonitor_IsActive()) return 0;
+static void button_monitor_loop() {
+    using namespace std::chrono_literals;
+    while (!g_button_thread_stop.load(std::memory_order_relaxed)) {
+        if (!ButtonMonitor_IsActive()) {
+            std::this_thread::sleep_for(100ms);
+            continue;
+        }
 
-    const int state = poll_button();
-    if (state == BUTTON_NO_CHANGE) return 0;
+        const int state = poll_button();
+        if (state != BUTTON_NO_CHANGE) {
+            const CommandSource src = SerialINT_IsActive() ? CommandSource::SERIAL : CommandSource::CONSOLE;
+            setCurrentCommandSource(src);
+            route_output(std::string("[BTN] ") + button_state_name(state), true);
+            if (state == BUTTON_BUTTON_PRESSED && g_main_config) {
+                std::string mic_status;
+                toggleMicRecording(*g_main_config, mic_status);
+                route_output(mic_status, true);
+            }
+            if (SerialINT_IsActive()) {
+                route_output("-> ", false);
+            } else {
+                rl_on_new_line();
+                rl_redisplay();
+            }
+        }
 
-    std::cout << "\r\n[BTN] " << button_state_name(state) << "\r\n";
-    if (state == BUTTON_BUTTON_PRESSED && g_main_config) {
-        std::string mic_status;
-        toggleMicRecording(*g_main_config, mic_status);
-        std::cout << mic_status << "\r\n";
+        std::this_thread::sleep_for(20ms);
     }
-    rl_on_new_line();
-    rl_redisplay();
-    return 0;
 }
 
 int main() {
@@ -282,7 +295,8 @@ startSerialListener([&](const std::string& line) {
 
     // Set up tab completion
     rl_attempted_completion_function = custom_completion;
-    rl_event_hook = button_event_hook;
+    g_button_thread_stop.store(false, std::memory_order_relaxed);
+    g_button_thread = std::thread(button_monitor_loop);
 
     // Load persistent history
     std::string histFile = expandTilde(HISTORY_FILE);
@@ -360,6 +374,8 @@ startSerialListener([&](const std::string& line) {
 
     // Save history on exit
     write_history(histFile.c_str());
+    g_button_thread_stop.store(true, std::memory_order_relaxed);
+    if (g_button_thread.joinable()) g_button_thread.join();
     stopBluetoothReconnectService();
     stopMicHotkeyService();
 
