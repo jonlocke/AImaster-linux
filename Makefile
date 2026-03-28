@@ -1,5 +1,5 @@
 CXX = g++
-CXXFLAGS = -Wall -std=c++17 -Iinclude -I/usr/include/poppler/cpp -I/usr/include/jsoncpp
+CXXFLAGS = -Wall -Wno-psabi -std=c++17 -Iinclude -I/usr/include/poppler/cpp -I/usr/include/jsoncpp
 LDFLAGS = -lserialport -ljsoncpp -lcurl -lreadline -lpoppler-cpp -ltesseract
 
 TARGET = AImaster
@@ -10,6 +10,7 @@ OBJS = \
   src/config_loader.o \
   src/serial_handler.o \
   src/chat_provider.o \
+  src/hid_button.o \
   src/ollama_client.o \
   src/linux_integrations.o \
   src/tts.o \

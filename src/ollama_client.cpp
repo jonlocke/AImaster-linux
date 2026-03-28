@@ -8,6 +8,7 @@
 #include "chat_provider.hpp"
 #include "tts.hpp"
 #include "linux_integrations.hpp"
+#include "hid_button.h"
 
 #include <curl/curl.h>
 #include <algorithm>
@@ -20,6 +21,7 @@
 #include <sstream>
 #include <memory>
 #include <mutex>
+#include <thread>
 #include <vector>
 #include "route_context.h"
 
@@ -310,6 +312,7 @@ static bool sendMessageToOllama(const std::string& query,
 
 // ================= Serial INT state =================
 static std::atomic<bool> g_serial_int_active{false};
+static std::atomic<bool> g_button_monitor_active{false};
 static std::vector<Json::Value> g_chatHistory;
 static std::mutex g_chatHistoryMutex;
 enum class ReadStage { Idle=0, WaitingContext, WaitingFilename, WaitingContextPresetFile, WaitingPickIndex_ContextKnown, WaitingPickIndex_ThenAskContext };
@@ -341,6 +344,14 @@ bool SerialINT_IsActive() {
     return g_serial_int_active.load(std::memory_order_relaxed);
 }
 
+bool ButtonMonitor_IsActive() {
+    return g_button_monitor_active.load(std::memory_order_relaxed);
+}
+
+void ButtonMonitor_SetActive(bool enabled) {
+    g_button_monitor_active.store(enabled, std::memory_order_relaxed);
+}
+
 void SerialINT_Start(AppConfig& config) {
     g_serial_int_active.store(true, std::memory_order_relaxed);
     diag_log("[DIAG] INT called from source=%d\n", (int)getCurrentCommandSource());
@@ -352,12 +363,14 @@ void SerialINT_HandleLine(const std::string& line, AppConfig& config) {
     AIMaster_RAG_ConfigureRemote(config.ollama_url, config.ollama_model);
     if (line == "/bye") {
         g_serial_int_active.store(false, std::memory_order_relaxed);
+        g_button_monitor_active.store(false, std::memory_order_relaxed);
         route_output("[Returning to main prompt]", true);
         route_output(modelPrompt(config, "> "), false);
         return;
     }
     if (line == "/n") {
         g_serial_int_active.store(false, std::memory_order_relaxed);
+        g_button_monitor_active.store(false, std::memory_order_relaxed);
         route_output(modelPrompt(config, "> "), false);
         return;
     }
@@ -697,6 +710,8 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
             cmds["QUIT"] = "Exit AImaster.";
             cmds["DELAY <ms>"] = "Set the serial character send delay.";
             cmds["DIAG [on|off]"] = "Toggle diagnostic logging.";
+            cmds["BTN"] = "Show Dream Cheeky button state; in INT mode, start non-blocking transition monitoring.";
+            cmds["BTN OFF"] = "Stop Dream Cheeky button monitoring.";
             cmds["/RESET"] = "Clear the UART screen and redraw the welcome banner.";
             cmds["/speak on"] = "Enable text-to-speech output for assistant replies.";
             cmds["/speak off"] = "Disable text-to-speech output.";
@@ -729,6 +744,30 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
         for (auto& key : cmds.getMemberNames()) {
             route_output("  " + key + " - " + cmds[key].asString(), true);
         }
+        return result;
+    }
+    // ===== BTN =====
+    else if (cmd_upper == "BTN" || cmd_upper == "BTN OFF") {
+        if (cmd_upper == "BTN OFF") {
+            ButtonMonitor_SetActive(false);
+            route_output("[BTN] Monitoring stopped.", true);
+            result["status"] = "success";
+            return result;
+        }
+        if (!init_button()) {
+            route_output("[Error] Dream Cheeky button not found or not accessible.", true);
+            result["status"] = "error";
+            return result;
+        }
+        int state = poll_button();
+        if (state == BUTTON_NO_CHANGE) state = button_last_state();
+        route_output(std::string("[BTN] Current state: ") + button_state_name(state), true);
+        if (SerialINT_IsActive()) {
+            ButtonMonitor_SetActive(true);
+            route_output("[BTN] Monitoring transitions in INT mode. Use BTN OFF to stop.", true);
+            route_output("-> ", false);
+        }
+        result["status"] = "success";
         return result;
     }
     // ===== /RESET =====

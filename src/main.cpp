@@ -20,6 +20,7 @@
 #include "io_sink.h"
 #include "route_context.h"
 #include "linux_integrations.hpp"
+#include "hid_button.h"
 
 
 
@@ -27,6 +28,7 @@
 
 namespace fs = std::filesystem;
 static const char* HISTORY_FILE = "~/.ollama_cli_history";
+static AppConfig* g_main_config = nullptr;
 
 
 
@@ -181,8 +183,30 @@ char** custom_completion(const char* text, int start, int end) {
     return nullptr;
 }
 
+static int button_event_hook() {
+    static auto last_poll = std::chrono::steady_clock::time_point::min();
+    const auto now = std::chrono::steady_clock::now();
+    if (now - last_poll < std::chrono::milliseconds(20)) return 0;
+    last_poll = now;
+    if (!SerialINT_IsActive() || !ButtonMonitor_IsActive()) return 0;
+
+    const int state = poll_button();
+    if (state == BUTTON_NO_CHANGE) return 0;
+
+    std::cout << "\r\n[BTN] " << button_state_name(state) << "\r\n";
+    if (state == BUTTON_BUTTON_PRESSED && g_main_config) {
+        std::string mic_status;
+        toggleMicRecording(*g_main_config, mic_status);
+        std::cout << mic_status << "\r\n";
+    }
+    rl_on_new_line();
+    rl_redisplay();
+    return 0;
+}
+
 int main() {
     AppConfig config;
+    g_main_config = &config;
     if (!loadConfig("config.txt", config)) {
         std::cerr << "Error loading config.txt" << std::endl;
         return 1;
@@ -258,6 +282,7 @@ startSerialListener([&](const std::string& line) {
 
     // Set up tab completion
     rl_attempted_completion_function = custom_completion;
+    rl_event_hook = button_event_hook;
 
     // Load persistent history
     std::string histFile = expandTilde(HISTORY_FILE);
