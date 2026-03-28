@@ -361,6 +361,7 @@ void SerialINT_Start(AppConfig& config) {
 
 void SerialINT_HandleLine(const std::string& line, AppConfig& config) {
     AIMaster_RAG_ConfigureRemote(config.ollama_url, config.ollama_model);
+    const std::string upper_line = toupper_copy(line);
     if (line == "/bye") {
         g_serial_int_active.store(false, std::memory_order_relaxed);
         g_button_monitor_active.store(false, std::memory_order_relaxed);
@@ -372,6 +373,11 @@ void SerialINT_HandleLine(const std::string& line, AppConfig& config) {
         g_serial_int_active.store(false, std::memory_order_relaxed);
         g_button_monitor_active.store(false, std::memory_order_relaxed);
         route_output(modelPrompt(config, "> "), false);
+        return;
+    }
+    if (upper_line == "BTN" || upper_line == "BTN OFF") {
+        processCommand(line, config);
+        if (SerialINT_IsActive()) route_output("-> ", false);
         return;
     }
 
