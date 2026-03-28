@@ -448,7 +448,7 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
         std::string device_error;
         auto devices = listPlaybackDevices(device_error);
         std::string bt_error;
-        auto bluetooth_devices = listConnectedBluetoothDevices(bt_error);
+        auto bluetooth_devices = listKnownBluetoothDevices(bt_error);
         for (const auto& bt : bluetooth_devices) {
             const std::string bluealsa_id = "bluealsa:DEV=" + bt.mac + ",PROFILE=a2dp";
             bool present = false;
@@ -486,7 +486,7 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
             if (!bluetooth_devices.empty()) {
                 route_output("Bluetooth speaker/headset entries are selectable by the numbered list above.", true);
             } else {
-                route_output("Use /pair to connect a Bluetooth speaker/headset; once connected it can be added to the numbered list above.", true);
+                route_output("Use /pair to scan, pair, and connect a Bluetooth speaker/headset so it appears in the numbered list above.", true);
             }
             route_output("Use: /sound <#|device> to set the TTS output device.", true);
             result["status"] = "success";

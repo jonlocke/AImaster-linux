@@ -190,6 +190,26 @@ bool deviceRequiresExplicitAlsaRouting(const AppConfig& config) {
     return true;
 }
 
+std::string formatCommandForLog(const std::vector<std::string>& argv) {
+    std::ostringstream oss;
+    for (size_t i = 0; i < argv.size(); ++i) {
+        if (i > 0) oss << ' ';
+        const std::string& arg = argv[i];
+        const bool needs_quotes = arg.find_first_of(" \t\"'") != std::string::npos;
+        if (!needs_quotes) {
+            oss << arg;
+            continue;
+        }
+        oss << '\'';
+        for (char ch : arg) {
+            if (ch == '\'') oss << "'\\''";
+            else oss << ch;
+        }
+        oss << '\'';
+    }
+    return oss.str();
+}
+
 bool playAudioBytes(const std::vector<unsigned char>& audio, const AppConfig& config, std::string& backend_used, std::string& error) {
     std::string path;
     if (!writeAudioTempFile(audio, path, error)) return false;
@@ -220,9 +240,10 @@ bool playAudioBytes(const std::vector<unsigned char>& audio, const AppConfig& co
         }
         else if (name == "aplay") {
             std::vector<std::string> args{exe, "-q"};
-            if (!config.tts_output_device.empty()) {
+            const std::string playback_device = trim_copy(config.tts_output_device);
+            if (!playback_device.empty()) {
                 args.push_back("-D");
-                args.push_back(config.tts_output_device);
+                args.push_back(playback_device);
             }
             args.push_back(path);
             backends.push_back({"aplay", std::move(args)});
@@ -243,12 +264,14 @@ bool playAudioBytes(const std::vector<unsigned char>& audio, const AppConfig& co
 
     for (const auto& backend : backends) {
         std::string backend_error;
+        const std::string command_for_log = formatCommandForLog(backend.args);
+        std::cerr << "[Info] TTS playback command: " << command_for_log << "\n";
         if (runPlayback(backend.args, backend_error)) {
             backend_used = backend.name;
             ::unlink(path.c_str());
             return true;
         }
-        error = backend.name + std::string(": ") + backend_error;
+        error = backend.name + std::string(": ") + backend_error + " | cmd: " + command_for_log;
     }
 
     ::unlink(path.c_str());

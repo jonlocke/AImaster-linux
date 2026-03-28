@@ -614,6 +614,34 @@ bool pairBluetoothDevice(const AppConfig& config, const std::string& target, std
     return ok || exit_code == 0;
 }
 
+std::vector<BluetoothDeviceInfo> listKnownBluetoothDevices(std::string& error) {
+    error.clear();
+    int exit_code = 0;
+    const std::string output = run_command_capture("bluetoothctl devices 2>/dev/null", &exit_code);
+    if (exit_code != 0 && output.empty()) {
+        error = "Failed to query Bluetooth devices.";
+        return {};
+    }
+
+    std::vector<BluetoothDeviceInfo> devices;
+    std::istringstream iss(output);
+    std::string line;
+    while (std::getline(iss, line)) {
+        line = trim_copy(line);
+        if (line.rfind("Device ", 0) != 0) continue;
+        std::istringstream ls(line);
+        std::string tag;
+        BluetoothDeviceInfo info;
+        ls >> tag >> info.mac;
+        std::getline(ls, info.name);
+        info.name = trim_copy(info.name);
+        if (!is_mac_address(info.mac)) continue;
+        if (info.name.empty() || info.name == info.mac) continue;
+        devices.push_back(info);
+    }
+    return devices;
+}
+
 std::vector<BluetoothDeviceInfo> listConnectedBluetoothDevices(std::string& error) {
     error.clear();
     int exit_code = 0;

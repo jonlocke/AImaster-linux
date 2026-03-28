@@ -41,6 +41,7 @@ bool stopMicRecording(AppConfig& config, std::string& status);
 std::string micServiceStatus(const AppConfig& config);
 
 std::vector<BluetoothDeviceInfo> scanBluetoothDevices(const AppConfig& config, std::string& error);
+std::vector<BluetoothDeviceInfo> listKnownBluetoothDevices(std::string& error);
 std::vector<BluetoothDeviceInfo> listConnectedBluetoothDevices(std::string& error);
 const std::vector<BluetoothDeviceInfo>& lastScannedBluetoothDevices();
 bool pairBluetoothDevice(const AppConfig& config, const std::string& target, std::string& status);
