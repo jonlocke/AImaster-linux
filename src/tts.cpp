@@ -181,6 +181,15 @@ bool bluealsaPlaybackAvailable(const std::string& device) {
     return false;
 }
 
+bool waitForBluealsaPlaybackDevice(const std::string& device, int timeout_ms = 8000, int poll_ms = 200) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (bluealsaPlaybackAvailable(device)) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(poll_ms));
+    }
+    return bluealsaPlaybackAvailable(device);
+}
+
 bool bluealsaPlaybackSuppressed(const std::string& device) {
     std::lock_guard<std::mutex> lock(g_unavailable_bluealsa_mutex);
     return g_unavailable_bluealsa_device == device &&
@@ -457,7 +466,13 @@ bool playAudioBytes(const std::vector<unsigned char>& audio, const AppConfig& co
         else if (name == "aplay") {
             const std::string playback_device = trim_copy(config.tts_output_device);
             if (playback_device.rfind("bluealsa:", 0) == 0) {
-                if (bluealsaPlaybackSuppressed(playback_device)) continue;
+                if (!bluealsaPlaybackAvailable(playback_device)) {
+                    if (bluealsaPlaybackSuppressed(playback_device)) continue;
+                    if (!waitForBluealsaPlaybackDevice(playback_device)) {
+                        suppressBluealsaPlayback(playback_device);
+                        continue;
+                    }
+                }
                 if (!bluealsaPlaybackAvailable(playback_device)) {
                     suppressBluealsaPlayback(playback_device);
                     continue;
