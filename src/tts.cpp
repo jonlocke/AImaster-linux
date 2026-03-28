@@ -151,6 +151,18 @@ struct BluealsaPlaybackInfo {
     std::string description;
 };
 
+std::string profileLabelForBluealsaId(const std::string& id) {
+    const std::string marker = "PROFILE=";
+    const auto pos = id.find(marker);
+    if (pos == std::string::npos) return {};
+    const auto start = pos + marker.size();
+    const auto end = id.find(',', start);
+    const std::string profile = uppercase_copy(id.substr(start, end == std::string::npos ? std::string::npos : end - start));
+    if (profile == "A2DP") return "A2DP speaker";
+    if (profile == "SCO") return "Headset profile";
+    return profile;
+}
+
 std::vector<BluealsaPlaybackInfo> listBluealsaPlaybackDevices() {
     std::vector<BluealsaPlaybackInfo> devices;
     FILE* pipe = ::popen("bluealsa-aplay -L 2>/dev/null", "r");
@@ -167,7 +179,10 @@ std::vector<BluealsaPlaybackInfo> listBluealsaPlaybackDevices() {
         }
         if (current_id.empty()) continue;
         if (line.find(", playback") == std::string::npos) continue;
-        devices.push_back({current_id, line});
+        std::string description = line;
+        const std::string profile_label = profileLabelForBluealsaId(current_id);
+        if (!profile_label.empty()) description += " [" + profile_label + "]";
+        devices.push_back({current_id, description});
     }
 
     ::pclose(pipe);
