@@ -467,20 +467,7 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
         std::string device_error;
         auto devices = listPlaybackDevices(device_error);
         std::string bt_error;
-        auto bluetooth_devices = listKnownBluetoothDevices(bt_error);
-        for (const auto& bt : bluetooth_devices) {
-            const std::string bluealsa_id = "bluealsa:DEV=" + bt.mac + ",PROFILE=a2dp";
-            bool present = false;
-            for (const auto& device : devices) {
-                if (device.id == bluealsa_id) {
-                    present = true;
-                    break;
-                }
-            }
-            if (!present) {
-                devices.push_back({bluealsa_id, "Bluetooth: " + bt.name + " (" + bt.mac + ")", false});
-            }
-        }
+        auto bluetooth_devices = listConnectedBluetoothDevices(bt_error);
         Json::Value device_list(Json::arrayValue);
         for (const auto& device : devices) {
             Json::Value item(Json::objectValue);
@@ -504,7 +491,7 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
             if (!device_error.empty()) route_output(std::string("[Warn] ") + device_error, true);
             if (!bt_error.empty()) route_output(std::string("[Warn] ") + bt_error, true);
             if (!bluetooth_devices.empty()) {
-                route_output("Bluetooth speaker/headset entries are selectable by the numbered list above.", true);
+                route_output("Only live Bluetooth playback profiles are listed above. If a headset is in mic/SCO mode, A2DP speaker output may be unavailable until it switches back.", true);
             } else {
                 route_output("Use /pair to scan, pair, and connect a Bluetooth speaker/headset so it appears in the numbered list above.", true);
             }

@@ -58,6 +58,13 @@ BluetoothReconnectState g_bt_reconnect;
 std::mutex g_bt_mutex;
 std::vector<BluetoothDeviceInfo> g_last_bt_scan;
 
+struct BluealsaPcmInfo {
+    std::string id;
+    std::string description;
+    bool playback = false;
+    bool capture = false;
+};
+
 std::string trim_copy(std::string s) {
     auto not_space = [](unsigned char ch) { return !std::isspace(ch); };
     s.erase(s.begin(), std::find_if(s.begin(), s.end(), not_space));
@@ -73,6 +80,54 @@ std::string shell_escape(const std::string& s) {
     }
     out.push_back('\'');
     return out;
+}
+
+std::vector<BluealsaPcmInfo> list_bluealsa_pcms() {
+    std::vector<BluealsaPcmInfo> devices;
+    FILE* pipe = ::popen("bluealsa-aplay -L 2>/dev/null", "r");
+    if (!pipe) return devices;
+
+    char buffer[512];
+    BluealsaPcmInfo current;
+    bool have_current = false;
+    auto flush_current = [&]() {
+        if (have_current && (!current.id.empty()) && (current.playback || current.capture)) {
+            devices.push_back(current);
+        }
+        current = BluealsaPcmInfo{};
+        have_current = false;
+    };
+
+    while (std::fgets(buffer, sizeof(buffer), pipe)) {
+        std::string line = trim_copy(buffer);
+        if (line.empty()) continue;
+        if (line.rfind("bluealsa:DEV=", 0) == 0) {
+            flush_current();
+            current.id = line;
+            have_current = true;
+            continue;
+        }
+        if (!have_current) continue;
+        if (line.find(", playback") != std::string::npos) {
+            current.playback = true;
+            current.description = line;
+        } else if (line.find(", capture") != std::string::npos) {
+            current.capture = true;
+            current.description = line;
+        }
+    }
+
+    flush_current();
+    ::pclose(pipe);
+    return devices;
+}
+
+bool has_bluealsa_pcm(const std::string& device_id, bool want_capture) {
+    for (const auto& pcm : list_bluealsa_pcms()) {
+        if (pcm.id != device_id) continue;
+        return want_capture ? pcm.capture : pcm.playback;
+    }
+    return false;
 }
 
 static size_t curl_write_string(void* contents, size_t size, size_t nmemb, void* userp) {
@@ -250,6 +305,12 @@ bool start_recording_locked(AppConfig& config, std::string& status) {
     }
     if (g_mic_service.transcribing) {
         status = "[Info] Microphone is still transcribing the previous clip.";
+        return false;
+    }
+    if (!config.mic_record_device.empty() &&
+        config.mic_record_device.rfind("bluealsa:", 0) == 0 &&
+        !has_bluealsa_pcm(config.mic_record_device, true)) {
+        status = "[Mic] Selected Bluetooth microphone is not available. Reconnect it and make sure headset/SCO mode is active.";
         return false;
     }
 
@@ -811,16 +872,10 @@ std::vector<CaptureDeviceInfo> listCaptureDevices(std::string& error) {
         ::pclose(pipe);
     }
 
-    std::string bt_error;
-    const auto bluetooth_devices = listKnownBluetoothDevices(bt_error);
-    if (!bt_error.empty()) {
-        if (!error.empty()) error += " ";
-        error += bt_error;
-    }
-    for (const auto& bt : bluetooth_devices) {
-        const std::string id = "bluealsa:DEV=" + bt.mac + ",PROFILE=sco";
-        if (!seen.insert(id).second) continue;
-        devices.push_back({id, "Bluetooth microphone: " + bt.name + " (" + bt.mac + ")", false});
+    for (const auto& pcm : list_bluealsa_pcms()) {
+        if (!pcm.capture) continue;
+        if (!seen.insert(pcm.id).second) continue;
+        devices.push_back({pcm.id, pcm.description, false});
     }
 
     return devices;

@@ -3,6 +3,7 @@
 #include <curl/curl.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cctype>
 #include <cerrno>
 #include <cstdio>
@@ -141,6 +142,64 @@ struct PersistentBluealsaPlayer {
 };
 
 PersistentBluealsaPlayer g_bluealsa_player;
+std::mutex g_unavailable_bluealsa_mutex;
+std::string g_unavailable_bluealsa_device;
+std::chrono::steady_clock::time_point g_unavailable_bluealsa_until = std::chrono::steady_clock::time_point::min();
+
+struct BluealsaPlaybackInfo {
+    std::string id;
+    std::string description;
+};
+
+std::vector<BluealsaPlaybackInfo> listBluealsaPlaybackDevices() {
+    std::vector<BluealsaPlaybackInfo> devices;
+    FILE* pipe = ::popen("bluealsa-aplay -L 2>/dev/null", "r");
+    if (!pipe) return devices;
+
+    char buffer[512];
+    std::string current_id;
+    while (std::fgets(buffer, sizeof(buffer), pipe)) {
+        std::string line = trim_copy(buffer);
+        if (line.empty()) continue;
+        if (line.rfind("bluealsa:DEV=", 0) == 0) {
+            current_id = line;
+            continue;
+        }
+        if (current_id.empty()) continue;
+        if (line.find(", playback") == std::string::npos) continue;
+        devices.push_back({current_id, line});
+    }
+
+    ::pclose(pipe);
+    return devices;
+}
+
+bool bluealsaPlaybackAvailable(const std::string& device) {
+    for (const auto& info : listBluealsaPlaybackDevices()) {
+        if (info.id == device) return true;
+    }
+    return false;
+}
+
+bool bluealsaPlaybackSuppressed(const std::string& device) {
+    std::lock_guard<std::mutex> lock(g_unavailable_bluealsa_mutex);
+    return g_unavailable_bluealsa_device == device &&
+           std::chrono::steady_clock::now() < g_unavailable_bluealsa_until;
+}
+
+void suppressBluealsaPlayback(const std::string& device) {
+    std::lock_guard<std::mutex> lock(g_unavailable_bluealsa_mutex);
+    g_unavailable_bluealsa_device = device;
+    g_unavailable_bluealsa_until = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+}
+
+void clearBluealsaPlaybackSuppression(const std::string& device) {
+    std::lock_guard<std::mutex> lock(g_unavailable_bluealsa_mutex);
+    if (g_unavailable_bluealsa_device == device) {
+        g_unavailable_bluealsa_device.clear();
+        g_unavailable_bluealsa_until = std::chrono::steady_clock::time_point::min();
+    }
+}
 
 void stopPersistentBluealsaPlayerLocked() {
     if (g_bluealsa_player.stdin_fd >= 0) {
@@ -398,6 +457,12 @@ bool playAudioBytes(const std::vector<unsigned char>& audio, const AppConfig& co
         else if (name == "aplay") {
             const std::string playback_device = trim_copy(config.tts_output_device);
             if (playback_device.rfind("bluealsa:", 0) == 0) {
+                if (bluealsaPlaybackSuppressed(playback_device)) continue;
+                if (!bluealsaPlaybackAvailable(playback_device)) {
+                    suppressBluealsaPlayback(playback_device);
+                    continue;
+                }
+                clearBluealsaPlaybackSuppression(playback_device);
                 backends.push_back({"aplay", {exe}, playback_device, true});
                 continue;
             }
@@ -457,6 +522,7 @@ bool playAudioBytes(const std::vector<unsigned char>& audio, const AppConfig& co
             ::unlink(path.c_str());
             return true;
         }
+        if (backend.persistent_bluealsa) suppressBluealsaPlayback(backend.device);
         error = backend.name + std::string(": ") + backend_error + " | cmd: " + command_for_log;
     }
 
@@ -492,6 +558,10 @@ std::vector<PlaybackDevice> listPlaybackDevices(std::string& error) {
     }
 
     ::pclose(pipe);
+    for (const auto& bt : listBluealsaPlaybackDevices()) {
+        if (!seen.insert(bt.id).second) continue;
+        devices.push_back({bt.id, bt.description, false});
+    }
     return devices;
 }
 
