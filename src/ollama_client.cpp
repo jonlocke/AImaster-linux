@@ -447,6 +447,8 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
         std::string arg = command.size() > 6 ? trim(command.substr(6)) : "";
         std::string device_error;
         auto devices = listPlaybackDevices(device_error);
+        std::string bt_error;
+        auto bluetooth_devices = listConnectedBluetoothDevices(bt_error);
         Json::Value device_list(Json::arrayValue);
         for (const auto& device : devices) {
             Json::Value item(Json::objectValue);
@@ -466,7 +468,17 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
                 if (devices[i].id == config.tts_output_device) line += " (current)";
                 route_output(line, true);
             }
+            if (!bluetooth_devices.empty()) {
+                route_output("Connected Bluetooth audio devices:", true);
+                for (const auto& device : bluetooth_devices) {
+                    route_output("  " + device.name + " - " + device.mac, true);
+                }
+                route_output("Use /pair to scan, pair, and connect Bluetooth speakers or headsets.", true);
+            } else {
+                route_output("Use /pair to connect a Bluetooth speaker/headset; once connected it may appear in the ALSA list above.", true);
+            }
             if (!device_error.empty()) route_output(std::string("[Warn] ") + device_error, true);
+            if (!bt_error.empty()) route_output(std::string("[Warn] ") + bt_error, true);
             route_output("Use: /sound <#|device> to set the TTS output device.", true);
             result["status"] = "success";
             return result;
@@ -670,8 +682,8 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
             cmds["/RESET"] = "Clear the UART screen and redraw the welcome banner.";
             cmds["/speak on"] = "Enable text-to-speech output for assistant replies.";
             cmds["/speak off"] = "Disable text-to-speech output.";
-            cmds["/sound"] = "List or set the TTS output device.";
-            cmds["/mic"] = "Control microphone recording and status.";
+            cmds["/sound"] = "List/set sound output devices and show Bluetooth speaker/headset connection state.";
+            cmds["/mic"] = "List/set microphone input devices and control microphone recording.";
             cmds["/hid"] = "List or capture the HID hotkey binding for microphone toggle.";
             cmds["/pair"] = "Scan for Bluetooth devices, then pair/connect by number or MAC.";
             cmds["CFG"] = "Show current configuration.";
@@ -710,6 +722,52 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
         bool ok = true;
         if (arg.empty() || eq_ci(arg, "status")) {
             status = "[Mic] " + micServiceStatus(config);
+        } else if (eq_ci(arg, "list") || eq_ci(arg, "devices")) {
+            std::string device_error;
+            const auto devices = listCaptureDevices(device_error);
+            route_output("Available microphone input devices:", true);
+            for (size_t i = 0; i < devices.size(); ++i) {
+                std::string line = "  [" + std::to_string(i + 1) + "] " + devices[i].id + " - " + devices[i].description;
+                if (devices[i].is_default) line += " (default)";
+                if ((config.mic_record_device.empty() && devices[i].id == "default") ||
+                    (!config.mic_record_device.empty() && devices[i].id == config.mic_record_device)) {
+                    line += " (current)";
+                }
+                route_output(line, true);
+            }
+            route_output("Use /pair to connect a Bluetooth microphone/headset; once connected it may appear in the ALSA capture list above.", true);
+            if (!device_error.empty()) route_output(std::string("[Warn] ") + device_error, true);
+            route_output("Use: /mic device <#|device>", true);
+            result["status"] = "success";
+            return result;
+        } else if (arg.rfind("device ", 0) == 0) {
+            const std::string choice = trim(arg.substr(7));
+            std::string device_error;
+            const auto devices = listCaptureDevices(device_error);
+            std::string chosen;
+            int idx = -1;
+            try { idx = std::stoi(choice); } catch (...) { idx = -1; }
+            if (idx >= 1 && idx <= static_cast<int>(devices.size())) {
+                chosen = devices[idx - 1].id;
+            } else {
+                for (const auto& device : devices) {
+                    if (device.id == choice || eq_ci(device.id, choice) || eq_ci(device.description, choice)) {
+                        chosen = device.id;
+                        break;
+                    }
+                }
+            }
+            if (chosen.empty()) {
+                ok = false;
+                status = std::string("[Error] Microphone device not found: ") + choice;
+            } else {
+                config.mic_record_device = (chosen == "default") ? "" : chosen;
+                if (saveConfig("config.txt", config)) {
+                    status = std::string("[OK] mic_record_device=") + (config.mic_record_device.empty() ? "default" : config.mic_record_device) + " (saved)";
+                } else {
+                    status = std::string("[OK] mic_record_device=") + (config.mic_record_device.empty() ? "default" : config.mic_record_device) + " (save failed)";
+                }
+            }
         } else if (eq_ci(arg, "on") || eq_ci(arg, "start")) {
             ok = startMicRecording(config, status);
         } else if (eq_ci(arg, "off") || eq_ci(arg, "stop")) {
@@ -718,7 +776,7 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
             ok = toggleMicRecording(config, status);
         } else {
             ok = false;
-            status = "Usage: /mic [status|on|off|toggle]";
+            status = "Usage: /mic [status|list|device <#|device>|on|off|toggle]";
         }
         route_output(status, true);
         result["status"] = ok ? "success" : "error";

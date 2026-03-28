@@ -21,6 +21,7 @@
 #include <cstring>
 #include <filesystem>
 #include <mutex>
+#include <set>
 #include <sstream>
 #include <thread>
 #include <vector>
@@ -558,7 +559,10 @@ std::vector<BluetoothDeviceInfo> scanBluetoothDevices(const AppConfig& config, s
         ls >> tag >> info.mac;
         std::getline(ls, info.name);
         info.name = trim_copy(info.name);
-        if (is_mac_address(info.mac)) devices.push_back(info);
+        if (!is_mac_address(info.mac)) continue;
+        if (info.name.empty()) continue;
+        if (info.name == info.mac) continue;
+        devices.push_back(info);
     }
 
     {
@@ -608,4 +612,61 @@ bool pairBluetoothDevice(const AppConfig& config, const std::string& target, std
         return false;
     }
     return ok || exit_code == 0;
+}
+
+std::vector<BluetoothDeviceInfo> listConnectedBluetoothDevices(std::string& error) {
+    error.clear();
+    int exit_code = 0;
+    const std::string output = run_command_capture("bluetoothctl devices Connected 2>/dev/null", &exit_code);
+    if (exit_code != 0 && output.empty()) {
+        error = "Failed to query connected Bluetooth devices.";
+        return {};
+    }
+
+    std::vector<BluetoothDeviceInfo> devices;
+    std::istringstream iss(output);
+    std::string line;
+    while (std::getline(iss, line)) {
+        line = trim_copy(line);
+        if (line.rfind("Device ", 0) != 0) continue;
+        std::istringstream ls(line);
+        std::string tag;
+        BluetoothDeviceInfo info;
+        ls >> tag >> info.mac;
+        std::getline(ls, info.name);
+        info.name = trim_copy(info.name);
+        if (!is_mac_address(info.mac)) continue;
+        if (info.name.empty() || info.name == info.mac) continue;
+        devices.push_back(info);
+    }
+    return devices;
+}
+
+std::vector<CaptureDeviceInfo> listCaptureDevices(std::string& error) {
+    std::vector<CaptureDeviceInfo> devices;
+    devices.push_back({"default", "ALSA default capture device", true});
+
+    FILE* pipe = ::popen("arecord -l 2>/dev/null", "r");
+    if (!pipe) {
+        error = "unable to execute 'arecord -l'";
+        return devices;
+    }
+
+    char buffer[512];
+    std::set<std::string> seen = {"default"};
+    while (std::fgets(buffer, sizeof(buffer), pipe)) {
+        std::string line = trim_copy(buffer);
+        if (line.rfind("card ", 0) != 0) continue;
+
+        int card = -1;
+        int device = -1;
+        if (std::sscanf(line.c_str(), "card %d: %*[^,], device %d:", &card, &device) != 2) continue;
+
+        std::string id = "plughw:" + std::to_string(card) + "," + std::to_string(device);
+        if (!seen.insert(id).second) continue;
+        devices.push_back({id, line, false});
+    }
+
+    ::pclose(pipe);
+    return devices;
 }

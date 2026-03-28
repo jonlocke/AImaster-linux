@@ -22,6 +22,12 @@ struct BluetoothDeviceInfo {
     std::string name;
 };
 
+struct CaptureDeviceInfo {
+    std::string id;
+    std::string description;
+    bool is_default = false;
+};
+
 using MicTranscriptCallback = std::function<void(const std::string&)>;
 
 std::vector<InputDeviceInfo> listInputDevices(std::string& error);
@@ -35,5 +41,7 @@ bool stopMicRecording(AppConfig& config, std::string& status);
 std::string micServiceStatus(const AppConfig& config);
 
 std::vector<BluetoothDeviceInfo> scanBluetoothDevices(const AppConfig& config, std::string& error);
+std::vector<BluetoothDeviceInfo> listConnectedBluetoothDevices(std::string& error);
 const std::vector<BluetoothDeviceInfo>& lastScannedBluetoothDevices();
 bool pairBluetoothDevice(const AppConfig& config, const std::string& target, std::string& status);
+std::vector<CaptureDeviceInfo> listCaptureDevices(std::string& error);
