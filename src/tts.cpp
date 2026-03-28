@@ -132,6 +132,31 @@ bool writeAudioTempFile(const std::vector<unsigned char>& audio, std::string& ou
     return true;
 }
 
+bool runShellPlayback(const std::string& command, std::string& error) {
+    pid_t pid = ::fork();
+    if (pid < 0) {
+        error = std::string("fork failed: ") + std::strerror(errno);
+        return false;
+    }
+    if (pid == 0) {
+        ::execl("/bin/sh", "sh", "-lc", command.c_str(), static_cast<char*>(nullptr));
+        _exit(127);
+    }
+
+    int status = 0;
+    if (::waitpid(pid, &status, 0) < 0) {
+        error = std::string("waitpid failed: ") + std::strerror(errno);
+        return false;
+    }
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+        std::ostringstream oss;
+        oss << "player exited with status " << (WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+        error = oss.str();
+        return false;
+    }
+    return true;
+}
+
 bool runPlayback(const std::vector<std::string>& argv, std::string& error) {
     std::vector<char*> args;
     args.reserve(argv.size() + 1);
@@ -210,6 +235,16 @@ std::string formatCommandForLog(const std::vector<std::string>& argv) {
     return oss.str();
 }
 
+std::string shellEscape(const std::string& arg) {
+    std::string out = "'";
+    for (char ch : arg) {
+        if (ch == '\'') out += "'\\''";
+        else out.push_back(ch);
+    }
+    out.push_back('\'');
+    return out;
+}
+
 bool playAudioBytes(const std::vector<unsigned char>& audio, const AppConfig& config, std::string& backend_used, std::string& error) {
     std::string path;
     if (!writeAudioTempFile(audio, path, error)) return false;
@@ -217,6 +252,8 @@ bool playAudioBytes(const std::vector<unsigned char>& audio, const AppConfig& co
     struct Backend {
         const char* name;
         std::vector<std::string> args;
+        std::string shell_command;
+        bool use_shell = false;
     };
 
     std::vector<Backend> backends;
@@ -239,8 +276,19 @@ bool playAudioBytes(const std::vector<unsigned char>& audio, const AppConfig& co
             backends.push_back({"paplay", {exe, path}});
         }
         else if (name == "aplay") {
-            std::vector<std::string> args{exe, "-q"};
             const std::string playback_device = trim_copy(config.tts_output_device);
+            if (playback_device.rfind("bluealsa:", 0) == 0) {
+                std::string ffmpeg_exe;
+                if (!findExecutable("ffmpeg", ffmpeg_exe)) continue;
+                const std::string shell_command =
+                    shellEscape(ffmpeg_exe) + " -i " + shellEscape(path) +
+                    " -ar 44100 -ac 2 -sample_fmt s16 -f wav - | " +
+                    shellEscape(exe) + " -q -D " + shellEscape(playback_device) +
+                    " --buffer-size=262144 --period-size=4096";
+                backends.push_back({"aplay", {}, shell_command, true});
+                continue;
+            }
+            std::vector<std::string> args{exe, "-q"};
             if (!playback_device.empty()) {
                 args.push_back("-D");
                 args.push_back(playback_device);
@@ -264,9 +312,12 @@ bool playAudioBytes(const std::vector<unsigned char>& audio, const AppConfig& co
 
     for (const auto& backend : backends) {
         std::string backend_error;
-        const std::string command_for_log = formatCommandForLog(backend.args);
+        const std::string command_for_log = backend.use_shell ? backend.shell_command : formatCommandForLog(backend.args);
         std::cerr << "[Info] TTS playback command: " << command_for_log << "\n";
-        if (runPlayback(backend.args, backend_error)) {
+        const bool ok = backend.use_shell
+            ? runShellPlayback(backend.shell_command, backend_error)
+            : runPlayback(backend.args, backend_error);
+        if (ok) {
             backend_used = backend.name;
             ::unlink(path.c_str());
             return true;
