@@ -44,6 +44,17 @@ struct MicServiceState {
 };
 
 MicServiceState g_mic_service;
+struct BluetoothReconnectState {
+    std::mutex mutex;
+    std::thread worker_thread;
+    bool worker_running = false;
+    bool stop_requested = false;
+    AppConfig* config = nullptr;
+    std::string last_attempt_mac;
+    std::chrono::steady_clock::time_point last_attempt_at = std::chrono::steady_clock::time_point::min();
+};
+
+BluetoothReconnectState g_bt_reconnect;
 std::mutex g_bt_mutex;
 std::vector<BluetoothDeviceInfo> g_last_bt_scan;
 
@@ -81,6 +92,15 @@ bool is_mac_address(const std::string& value) {
         }
     }
     return true;
+}
+
+std::string mac_from_bluealsa_device(const std::string& device) {
+    const std::string prefix = "bluealsa:DEV=";
+    if (device.rfind(prefix, 0) != 0) return {};
+    const auto start = prefix.size();
+    const auto end = device.find(',', start);
+    const std::string mac = device.substr(start, end == std::string::npos ? std::string::npos : end - start);
+    return is_mac_address(mac) ? mac : std::string();
 }
 
 std::string run_command_capture(const std::string& command, int* exit_code = nullptr) {
@@ -381,6 +401,79 @@ void mic_watcher_loop() {
     if (fd >= 0) close(fd);
 }
 
+void bluetooth_reconnect_loop() {
+    using namespace std::chrono_literals;
+    for (;;) {
+        AppConfig* cfg = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(g_bt_reconnect.mutex);
+            if (g_bt_reconnect.stop_requested) break;
+            cfg = g_bt_reconnect.config;
+        }
+
+        std::string target_mac;
+        if (cfg) target_mac = mac_from_bluealsa_device(cfg->tts_output_device);
+        if (target_mac.empty()) {
+            std::this_thread::sleep_for(2s);
+            continue;
+        }
+
+        std::string connected_error;
+        const auto connected = listConnectedBluetoothDevices(connected_error);
+        bool already_connected = false;
+        for (const auto& device : connected) {
+            if (device.mac == target_mac) {
+                already_connected = true;
+                break;
+            }
+        }
+        if (already_connected) {
+            std::this_thread::sleep_for(3s);
+            continue;
+        }
+
+        std::string known_error;
+        const auto known = listKnownBluetoothDevices(known_error);
+        bool known_device = false;
+        for (const auto& device : known) {
+            if (device.mac == target_mac) {
+                known_device = true;
+                break;
+            }
+        }
+        if (!known_device) {
+            std::this_thread::sleep_for(3s);
+            continue;
+        }
+
+        bool should_attempt = false;
+        {
+            std::lock_guard<std::mutex> lock(g_bt_reconnect.mutex);
+            const auto now = std::chrono::steady_clock::now();
+            const auto cooldown = 8s;
+            if (g_bt_reconnect.last_attempt_mac != target_mac || now - g_bt_reconnect.last_attempt_at >= cooldown) {
+                g_bt_reconnect.last_attempt_mac = target_mac;
+                g_bt_reconnect.last_attempt_at = now;
+                should_attempt = true;
+            }
+        }
+        if (!should_attempt) {
+            std::this_thread::sleep_for(1s);
+            continue;
+        }
+
+        int exit_code = 0;
+        const std::string command = "printf 'connect " + target_mac + "\\nquit\\n' | bluetoothctl";
+        const std::string output = run_command_capture("sh -lc " + shell_escape(command), &exit_code);
+        if (output.find("Connection successful") != std::string::npos ||
+            output.find("Connected: yes") != std::string::npos) {
+            route_output("[Bluetooth] Reconnected " + target_mac, true);
+        }
+
+        std::this_thread::sleep_for(2s);
+    }
+}
+
 } // namespace
 
 std::vector<InputDeviceInfo> listInputDevices(std::string& error) {
@@ -673,28 +766,66 @@ std::vector<BluetoothDeviceInfo> listConnectedBluetoothDevices(std::string& erro
 std::vector<CaptureDeviceInfo> listCaptureDevices(std::string& error) {
     std::vector<CaptureDeviceInfo> devices;
     devices.push_back({"default", "ALSA default capture device", true});
+    std::set<std::string> seen = {"default"};
 
     FILE* pipe = ::popen("arecord -l 2>/dev/null", "r");
     if (!pipe) {
         error = "unable to execute 'arecord -l'";
-        return devices;
+    } else {
+        char buffer[512];
+        while (std::fgets(buffer, sizeof(buffer), pipe)) {
+            std::string line = trim_copy(buffer);
+            if (line.rfind("card ", 0) != 0) continue;
+
+            int card = -1;
+            int device = -1;
+            if (std::sscanf(line.c_str(), "card %d: %*[^,], device %d:", &card, &device) != 2) continue;
+
+            std::string id = "plughw:" + std::to_string(card) + "," + std::to_string(device);
+            if (!seen.insert(id).second) continue;
+            devices.push_back({id, line, false});
+        }
+        ::pclose(pipe);
     }
 
-    char buffer[512];
-    std::set<std::string> seen = {"default"};
-    while (std::fgets(buffer, sizeof(buffer), pipe)) {
-        std::string line = trim_copy(buffer);
-        if (line.rfind("card ", 0) != 0) continue;
-
-        int card = -1;
-        int device = -1;
-        if (std::sscanf(line.c_str(), "card %d: %*[^,], device %d:", &card, &device) != 2) continue;
-
-        std::string id = "plughw:" + std::to_string(card) + "," + std::to_string(device);
+    std::string bt_error;
+    const auto bluetooth_devices = listKnownBluetoothDevices(bt_error);
+    if (!bt_error.empty()) {
+        if (!error.empty()) error += " ";
+        error += bt_error;
+    }
+    for (const auto& bt : bluetooth_devices) {
+        const std::string id = "bluealsa:DEV=" + bt.mac + ",PROFILE=sco";
         if (!seen.insert(id).second) continue;
-        devices.push_back({id, line, false});
+        devices.push_back({id, "Bluetooth microphone: " + bt.name + " (" + bt.mac + ")", false});
     }
 
-    ::pclose(pipe);
     return devices;
+}
+
+bool configureBluetoothReconnectService(AppConfig& config, std::string& status) {
+    std::lock_guard<std::mutex> lock(g_bt_reconnect.mutex);
+    g_bt_reconnect.config = &config;
+    if (!g_bt_reconnect.worker_running) {
+        g_bt_reconnect.stop_requested = false;
+        g_bt_reconnect.worker_running = true;
+        g_bt_reconnect.worker_thread = std::thread(bluetooth_reconnect_loop);
+    }
+    const std::string mac = mac_from_bluealsa_device(config.tts_output_device);
+    if (mac.empty()) {
+        status = "[Bluetooth] Auto-reconnect idle. Select a Bluetooth /sound device to enable it.";
+    } else {
+        status = "[Bluetooth] Auto-reconnect watching " + mac + ".";
+    }
+    return true;
+}
+
+void stopBluetoothReconnectService() {
+    std::unique_lock<std::mutex> lock(g_bt_reconnect.mutex);
+    if (!g_bt_reconnect.worker_running) return;
+    g_bt_reconnect.stop_requested = true;
+    lock.unlock();
+    if (g_bt_reconnect.worker_thread.joinable()) g_bt_reconnect.worker_thread.join();
+    lock.lock();
+    g_bt_reconnect.worker_running = false;
 }

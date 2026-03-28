@@ -476,7 +476,8 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
         if (arg.empty()) {
             route_output("Available sound output devices:", true);
             for (size_t i = 0; i < devices.size(); ++i) {
-                std::string line = "  [" + std::to_string(i + 1) + "] " + devices[i].id + " - " + devices[i].description;
+                std::string label = devices[i].description.empty() ? devices[i].id : devices[i].description;
+                std::string line = "  [" + std::to_string(i + 1) + "] " + label;
                 if (devices[i].is_default) line += " (default)";
                 if (devices[i].id == config.tts_output_device) line += " (current)";
                 route_output(line, true);
@@ -515,11 +516,14 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
 
         config.tts_output_device = chosen;
         result["tts_output_device"] = chosen;
+        std::string bt_status;
+        configureBluetoothReconnectService(config, bt_status);
         if (saveConfig("config.txt", config)) {
             route_output(std::string("[OK] tts_output_device=") + chosen + " (saved)", true);
         } else {
             route_output(std::string("[OK] tts_output_device=") + chosen + " (save failed)", true);
         }
+        if (!bt_status.empty()) route_output(bt_status, true);
         result["status"] = "success";
         return result;
     }
@@ -753,7 +757,8 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
             const auto devices = listCaptureDevices(device_error);
             route_output("Available microphone input devices:", true);
             for (size_t i = 0; i < devices.size(); ++i) {
-                std::string line = "  [" + std::to_string(i + 1) + "] " + devices[i].id + " - " + devices[i].description;
+                std::string label = devices[i].description.empty() ? devices[i].id : devices[i].description;
+                std::string line = "  [" + std::to_string(i + 1) + "] " + label;
                 if (devices[i].is_default) line += " (default)";
                 if ((config.mic_record_device.empty() && devices[i].id == "default") ||
                     (!config.mic_record_device.empty() && devices[i].id == config.mic_record_device)) {

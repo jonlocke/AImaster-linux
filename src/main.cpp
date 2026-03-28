@@ -271,6 +271,11 @@ startSerialListener([&](const std::string& line) {
         }, mic_status);
         if (!mic_status.empty()) std::cout << mic_status << std::endl;
     }
+    {
+        std::string bt_status;
+        configureBluetoothReconnectService(config, bt_status);
+        if (!bt_status.empty()) std::cout << bt_status << std::endl;
+    }
 
     while (true) {
         std::string prompt;
@@ -330,6 +335,7 @@ startSerialListener([&](const std::string& line) {
 
     // Save history on exit
     write_history(histFile.c_str());
+    stopBluetoothReconnectService();
     stopMicHotkeyService();
 
     return 0;

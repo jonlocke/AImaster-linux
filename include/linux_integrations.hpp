@@ -46,3 +46,6 @@ std::vector<BluetoothDeviceInfo> listConnectedBluetoothDevices(std::string& erro
 const std::vector<BluetoothDeviceInfo>& lastScannedBluetoothDevices();
 bool pairBluetoothDevice(const AppConfig& config, const std::string& target, std::string& status);
 std::vector<CaptureDeviceInfo> listCaptureDevices(std::string& error);
+
+bool configureBluetoothReconnectService(AppConfig& config, std::string& status);
+void stopBluetoothReconnectService();
