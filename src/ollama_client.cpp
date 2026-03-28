@@ -685,23 +685,40 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
             }
         } else {
             cmds["ASK"] = "Ask the model a question.";
+            cmds["ASK <question>"] = "Ask the model without an extra prompt.";
             cmds["INT"] = "Enter interactive mode with the model.";
             cmds["READ"] = "Send a file with context to the model.";
+            cmds["READPICK"] = "Pick a file from the code directory, then send it with context.";
             cmds["RESET"] = "Clear chat history.";
+            cmds["QUIT"] = "Exit AImaster.";
+            cmds["DELAY <ms>"] = "Set the serial character send delay.";
+            cmds["DIAG [on|off]"] = "Toggle diagnostic logging.";
             cmds["/RESET"] = "Clear the UART screen and redraw the welcome banner.";
             cmds["/speak on"] = "Enable text-to-speech output for assistant replies.";
             cmds["/speak off"] = "Disable text-to-speech output.";
-            cmds["/sound"] = "List/set sound output devices and show Bluetooth speaker/headset connection state.";
-            cmds["/mic"] = "List/set microphone input devices and control microphone recording.";
-            cmds["/hid"] = "List or capture the HID hotkey binding for microphone toggle.";
-            cmds["/pair"] = "Scan for Bluetooth devices, then pair/connect by number or MAC.";
+            cmds["/sound"] = "List sound output devices, including known Bluetooth speaker/headset targets.";
+            cmds["/sound <#|device>"] = "Select the TTS output device.";
+            cmds["/mic"] = "Show microphone hotkey/recording status.";
+            cmds["/mic list"] = "List available microphone capture devices.";
+            cmds["/mic device <#|device>"] = "Select the microphone capture device.";
+            cmds["/mic on"] = "Start microphone recording immediately.";
+            cmds["/mic off"] = "Stop microphone recording and transcribe/send it.";
+            cmds["/mic toggle"] = "Toggle microphone recording manually.";
+            cmds["/hid"] = "Show the current HID microphone-button binding.";
+            cmds["/hid list"] = "List available /dev/input/event* devices.";
+            cmds["/hid capture"] = "Wait for a button press and bind it to microphone toggle.";
+            cmds["/pair"] = "Scan for named Bluetooth devices.";
+            cmds["/pair <#|MAC>"] = "Pair, trust, and connect a Bluetooth device.";
             cmds["CFG"] = "Show current configuration.";
             cmds["HELP"] = "List available commands.";
-            cmds["MODEL"] = "List or set Ollama model.";
+            cmds["MODEL"] = "List available models.";
+            cmds["MODEL <#|name>"] = "Select the active model.";
             cmds["RAG_INGEST"] = "Ingest a folder into the RAG system.";
             cmds["RAG_SHOW"] = "Show the contents of the RAG ingestion.";
             cmds["RAG_ASK"] = "Ask RAG: RAG_ASK [--k N] [--thr T] <question...> (ASK/INT defaults use config: rag_chunks, rag_threshold).";
-            cmds["RAG_SESSION"] = "Display the session information.";
+            cmds["RAG_SESSION SHOW"] = "Display the active RAG session.";
+            cmds["RAG_SESSION SET <sid>"] = "Set the active RAG session.";
+            cmds["RAG_SESSION CLEAR"] = "Clear the active RAG session.";
         }
         result["commands"] = cmds;
         route_output("Available commands:", true);
