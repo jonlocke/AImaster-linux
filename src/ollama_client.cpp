@@ -1018,7 +1018,7 @@ void submitMicTranscript(const std::string& transcript, AppConfig& config) {
     const std::string clean = trim(transcript);
     if (clean.empty()) return;
 
-    route_output("mic: " + clean, true);
+    route_output("[Mic] " + clean, true);
 
     std::string rag_answer;
     if (rag_int::TryRAGAnswer(clean, rag_answer, /*k=*/config.rag_chunks, /*threshold=*/config.rag_threshold)) {
