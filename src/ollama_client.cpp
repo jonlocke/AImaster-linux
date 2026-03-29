@@ -703,7 +703,7 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
             cmds["QUIT"] = "Exit AImaster.";
             cmds["DELAY <ms>"] = "Set the serial character send delay.";
             cmds["DIAG [on|off]"] = "Toggle diagnostic logging.";
-            cmds["BTN"] = "Show Dream Cheeky button state; in INT mode, start non-blocking transition monitoring.";
+            cmds["BTN"] = "Enter Dream Cheeky button test mode; in INT, lid/button transitions are shown while the button still controls the mic.";
             cmds["BTN OFF"] = "Stop Dream Cheeky button monitoring.";
             cmds["/RESET"] = "Clear the UART screen and redraw the welcome banner.";
             cmds["/speak on"] = "Enable text-to-speech output for assistant replies.";
@@ -743,7 +743,7 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
     else if (cmd_upper == "BTN" || cmd_upper == "BTN OFF") {
         if (cmd_upper == "BTN OFF") {
             ButtonMonitor_SetActive(false);
-            route_output("[BTN] Monitoring stopped.", true);
+            route_output("[BTN] Test mode stopped.", true);
             result["status"] = "success";
             return result;
         }
@@ -757,7 +757,7 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
         route_output(std::string("[BTN] Current state: ") + button_state_name(state), true);
         if (SerialINT_IsActive()) {
             ButtonMonitor_SetActive(true);
-            route_output("[BTN] Monitoring transitions in INT mode. Use BTN OFF to stop.", true);
+            route_output("[BTN] Test mode active. Lid/button transitions will be shown while the button still toggles the mic. Use BTN OFF to stop test mode.", true);
             route_output("-> ", false);
         }
         result["status"] = "success";

@@ -33,6 +33,45 @@ static const char* HISTORY_FILE = "~/.ollama_cli_history";
 static AppConfig* g_main_config = nullptr;
 static std::atomic<bool> g_button_thread_stop{false};
 static std::thread g_button_thread;
+static std::atomic<bool> g_listening_spinner_visible{false};
+
+static void write_listening_status_raw(const std::string& text, bool use_serial) {
+    if (use_serial && serial_available) {
+        serialSend(text);
+    } else {
+        std::cout << text;
+        std::cout.flush();
+    }
+}
+
+static void update_listening_spinner(bool visible, bool use_serial) {
+    static constexpr char frames[] = {'-', '/', '-', '\\'};
+    static std::size_t frame_idx = 0;
+    static auto last_tick = std::chrono::steady_clock::time_point::min();
+    const bool currently_visible = g_listening_spinner_visible.load(std::memory_order_relaxed);
+
+    if (!visible) {
+        if (currently_visible) {
+            write_listening_status_raw("\r               \r", use_serial);
+            g_listening_spinner_visible.store(false, std::memory_order_relaxed);
+        }
+        return;
+    }
+
+    const auto now = std::chrono::steady_clock::now();
+    if (!currently_visible) {
+        frame_idx = 0;
+        write_listening_status_raw(std::string("[Listening ") + frames[frame_idx] + "]", use_serial);
+        g_listening_spinner_visible.store(true, std::memory_order_relaxed);
+        last_tick = now;
+        return;
+    }
+
+    if (now - last_tick < std::chrono::milliseconds(150)) return;
+    frame_idx = (frame_idx + 1) % 4;
+    write_listening_status_raw(std::string("\b\b") + frames[frame_idx] + "]", use_serial);
+    last_tick = now;
+}
 
 
 
@@ -189,23 +228,43 @@ char** custom_completion(const char* text, int start, int end) {
 
 static void button_monitor_loop() {
     using namespace std::chrono_literals;
+    bool button_ready = false;
     while (!g_button_thread_stop.load(std::memory_order_relaxed)) {
-        if (!ButtonMonitor_IsActive()) {
+        const bool int_active = SerialINT_IsActive();
+        const bool test_mode = ButtonMonitor_IsActive();
+        const bool should_poll = int_active || test_mode;
+        const bool use_serial = int_active;
+
+        update_listening_spinner(int_active && micRecordingActive(), use_serial);
+
+        if (!should_poll) {
+            button_ready = false;
             std::this_thread::sleep_for(100ms);
             continue;
         }
 
+        if (!button_ready) {
+            button_ready = init_button();
+            if (!button_ready) {
+                std::this_thread::sleep_for(500ms);
+                continue;
+            }
+        }
+
         const int state = poll_button();
         if (state != BUTTON_NO_CHANGE) {
-            const CommandSource src = SerialINT_IsActive() ? CommandSource::SERIAL : CommandSource::CONSOLE;
+            update_listening_spinner(false, use_serial);
+            const CommandSource src = use_serial ? CommandSource::SERIAL : CommandSource::CONSOLE;
             setCurrentCommandSource(src);
-            route_output(std::string("[BTN] ") + button_state_name(state), true);
             if (state == BUTTON_BUTTON_PRESSED && g_main_config) {
                 std::string mic_status;
                 toggleMicRecording(*g_main_config, mic_status);
+                if (test_mode) route_output(std::string("[BTN] ") + button_state_name(state), true);
                 route_output(mic_status, true);
+            } else if (test_mode) {
+                route_output(std::string("[BTN] ") + button_state_name(state), true);
             }
-            if (SerialINT_IsActive()) {
+            if (use_serial) {
                 route_output("-> ", false);
             } else {
                 rl_on_new_line();
@@ -215,6 +274,7 @@ static void button_monitor_loop() {
 
         std::this_thread::sleep_for(20ms);
     }
+    update_listening_spinner(false, SerialINT_IsActive());
 }
 
 int main() {

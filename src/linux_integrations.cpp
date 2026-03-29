@@ -750,6 +750,11 @@ std::string micServiceStatus(const AppConfig& config) {
     return oss.str();
 }
 
+bool micRecordingActive() {
+    std::lock_guard<std::mutex> lock(g_mic_service.mutex);
+    return g_mic_service.recording;
+}
+
 std::vector<BluetoothDeviceInfo> scanBluetoothDevices(const AppConfig& config, std::string& error) {
     error.clear();
     const int seconds = std::max(1, config.bluetooth_scan_seconds);

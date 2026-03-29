@@ -39,6 +39,7 @@ bool toggleMicRecording(AppConfig& config, std::string& status);
 bool startMicRecording(AppConfig& config, std::string& status);
 bool stopMicRecording(AppConfig& config, std::string& status);
 std::string micServiceStatus(const AppConfig& config);
+bool micRecordingActive();
 
 std::vector<BluetoothDeviceInfo> scanBluetoothDevices(const AppConfig& config, std::string& error);
 std::vector<BluetoothDeviceInfo> listKnownBluetoothDevices(std::string& error);
