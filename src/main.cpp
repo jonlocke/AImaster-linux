@@ -261,6 +261,9 @@ static void button_monitor_loop() {
             update_listening_spinner(false, use_serial);
             const CommandSource src = use_serial ? CommandSource::SERIAL : CommandSource::CONSOLE;
             setCurrentCommandSource(src);
+            if (use_serial) {
+                route_output("", true);
+            }
             if (state == BUTTON_BUTTON_PRESSED && g_main_config) {
                 std::string mic_status;
                 toggleMicRecording(*g_main_config, mic_status);
