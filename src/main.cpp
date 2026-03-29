@@ -34,7 +34,6 @@ static AppConfig* g_main_config = nullptr;
 static std::atomic<bool> g_button_thread_stop{false};
 static std::thread g_button_thread;
 static std::atomic<bool> g_listening_spinner_visible{false};
-static constexpr const char* kListeningClear = "\r                \r";
 
 static void write_listening_status_raw(const std::string& text, bool use_serial) {
     if (use_serial && serial_available) {
@@ -52,9 +51,14 @@ static void update_listening_spinner(bool visible, bool use_serial) {
     const bool currently_visible = g_listening_spinner_visible.load(std::memory_order_relaxed);
 
     if (!visible) {
-        if (currently_visible) {
-            write_listening_status_raw(kListeningClear, use_serial);
-            g_listening_spinner_visible.store(false, std::memory_order_relaxed);
+        g_listening_spinner_visible.store(false, std::memory_order_relaxed);
+        return;
+    }
+
+    if (use_serial) {
+        if (!currently_visible) {
+            write_listening_status_raw("[Listening >.....<]", true);
+            g_listening_spinner_visible.store(true, std::memory_order_relaxed);
         }
         return;
     }
