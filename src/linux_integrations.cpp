@@ -3,6 +3,7 @@
 #include "config_loader.h"
 #include "command_exec.h"
 #include "ollama_client.h"
+#include "route_context.h"
 
 #include <curl/curl.h>
 #include <fcntl.h>
@@ -418,8 +419,10 @@ bool stop_recording_locked(AppConfig& config, std::string& status) {
     status = "[Mic] Recording stopped. Transcribing...";
     auto callback = g_mic_service.callback;
     AppConfig* cfg_ptr = g_mic_service.config;
+    const CommandSource output_source = getCurrentCommandSource();
 
-    std::thread([audio_path, callback, cfg_ptr]() {
+    std::thread([audio_path, callback, cfg_ptr, output_source]() {
+        setCurrentCommandSource(output_source);
         std::string transcript;
         std::string error;
         if (cfg_ptr) transcript = transcribe_audio(*cfg_ptr, audio_path, error);
