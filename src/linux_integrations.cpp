@@ -332,6 +332,8 @@ std::string transcribe_audio(const AppConfig& config, const std::string& audio_p
 }
 
 bool start_recording_locked(AppConfig& config, std::string& status) {
+    const bool bluetooth_mic = !config.mic_record_device.empty() &&
+                               config.mic_record_device.rfind("bluealsa:", 0) == 0;
     if (g_mic_service.recording) {
         status = "[Info] Microphone is already recording.";
         return true;
@@ -340,11 +342,9 @@ bool start_recording_locked(AppConfig& config, std::string& status) {
         status = "[Info] Microphone is still transcribing the previous clip.";
         return false;
     }
-    if (!config.mic_record_device.empty() &&
-        config.mic_record_device.rfind("bluealsa:", 0) == 0 &&
-        !wait_for_bluealsa_pcm(config.mic_record_device, true)) {
+    if (bluetooth_mic && !wait_for_bluealsa_pcm(config.mic_record_device, true)) {
         diag_log_bluealsa_capture_state(config.mic_record_device);
-        status = "[Mic] Selected Bluetooth microphone is not available. Reconnect it and make sure headset/SCO mode is active.";
+        status = "[Mic] Bluetooth headset transport is not available. Reconnect or power-cycle the headset/dongle, then make sure headset/SCO mode is active.";
         return false;
     }
 
@@ -390,7 +390,11 @@ bool start_recording_locked(AppConfig& config, std::string& status) {
     const pid_t ready = waitpid(pid, &child_status, WNOHANG);
     if (ready == pid) {
         std::filesystem::remove(tmpl);
-        status = "[Error] Unable to start arecord. Confirm ALSA and the capture device.";
+        if (bluetooth_mic) {
+            status = "[Mic] Bluetooth headset transport dropped while opening the microphone. Reconnect or power-cycle the headset/dongle and try again.";
+        } else {
+            status = "[Error] Unable to start arecord. Confirm ALSA and the capture device.";
+        }
         return false;
     }
 
