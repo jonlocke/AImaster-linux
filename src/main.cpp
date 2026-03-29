@@ -266,14 +266,24 @@ static void button_monitor_loop() {
                 toggleMicRecording(*g_main_config, mic_status);
                 if (test_mode) route_output(std::string("[BTN] ") + button_state_name(state), true);
                 route_output(mic_status, true);
+                const bool now_recording = micRecordingActive();
+                if (now_recording) {
+                    update_listening_spinner(true, use_serial);
+                } else if (use_serial) {
+                    route_output("-> ", false);
+                } else {
+                    rl_on_new_line();
+                    rl_redisplay();
+                }
             } else if (test_mode) {
                 route_output(std::string("[BTN] ") + button_state_name(state), true);
-            }
-            if (use_serial) {
-                route_output("-> ", false);
             } else {
-                rl_on_new_line();
-                rl_redisplay();
+                if (use_serial) {
+                    route_output("-> ", false);
+                } else {
+                    rl_on_new_line();
+                    rl_redisplay();
+                }
             }
         }
 
