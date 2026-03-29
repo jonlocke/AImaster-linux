@@ -57,7 +57,7 @@ static void update_listening_spinner(bool visible, bool use_serial) {
 
     if (use_serial) {
         if (!currently_visible) {
-            write_listening_status_raw("[Listening >.....<]", true);
+            write_listening_status_raw("[Listening >.....<]\n", true);
             g_listening_spinner_visible.store(true, std::memory_order_relaxed);
         }
         return;

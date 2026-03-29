@@ -20,6 +20,7 @@
 bool serial_available = false;
 static sp_port* serial_port = nullptr;
 static std::atomic<int> serial_send_delay_ms{50};
+static std::mutex serial_write_mutex;
 
 // Newline policy: 0=CRLF, 1=LFCR, 2=LF, 3=CR
 static std::atomic<int> serial_newline_policy{0};
@@ -156,6 +157,7 @@ static bool write_byte(char c) {
 
 void serialSend(const std::string& data) {
     if (!serial_available || serial_port == nullptr) return;
+    std::lock_guard<std::mutex> lock(serial_write_mutex);
 
     const int delay_ms = serial_send_delay_ms.load(std::memory_order_relaxed);
     const int policy   = serial_newline_policy.load(std::memory_order_relaxed);
