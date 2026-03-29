@@ -132,6 +132,17 @@ bool has_bluealsa_pcm(const std::string& device_id, bool want_capture) {
     return false;
 }
 
+bool wait_for_bluealsa_pcm(const std::string& device_id, bool want_capture,
+                           std::chrono::milliseconds timeout = std::chrono::seconds(8),
+                           std::chrono::milliseconds poll_interval = std::chrono::milliseconds(200)) {
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (has_bluealsa_pcm(device_id, want_capture)) return true;
+        std::this_thread::sleep_for(poll_interval);
+    }
+    return has_bluealsa_pcm(device_id, want_capture);
+}
+
 void diag_log_bluealsa_capture_state(const std::string& selected_device) {
     if (!IsDiagnosticModeEnabled()) return;
     std::fprintf(stderr, "[DIAG] mic selected device: %s\n", selected_device.c_str());
@@ -331,7 +342,7 @@ bool start_recording_locked(AppConfig& config, std::string& status) {
     }
     if (!config.mic_record_device.empty() &&
         config.mic_record_device.rfind("bluealsa:", 0) == 0 &&
-        !has_bluealsa_pcm(config.mic_record_device, true)) {
+        !wait_for_bluealsa_pcm(config.mic_record_device, true)) {
         diag_log_bluealsa_capture_state(config.mic_record_device);
         status = "[Mic] Selected Bluetooth microphone is not available. Reconnect it and make sure headset/SCO mode is active.";
         return false;
