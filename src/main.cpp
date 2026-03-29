@@ -34,6 +34,7 @@ static AppConfig* g_main_config = nullptr;
 static std::atomic<bool> g_button_thread_stop{false};
 static std::thread g_button_thread;
 static std::atomic<bool> g_listening_spinner_visible{false};
+static constexpr const char* kListeningClear = "\r                \r";
 
 static void write_listening_status_raw(const std::string& text, bool use_serial) {
     if (use_serial && serial_available) {
@@ -52,7 +53,7 @@ static void update_listening_spinner(bool visible, bool use_serial) {
 
     if (!visible) {
         if (currently_visible) {
-            write_listening_status_raw("\r               \r", use_serial);
+            write_listening_status_raw(kListeningClear, use_serial);
             g_listening_spinner_visible.store(false, std::memory_order_relaxed);
         }
         return;
@@ -61,7 +62,7 @@ static void update_listening_spinner(bool visible, bool use_serial) {
     const auto now = std::chrono::steady_clock::now();
     if (!currently_visible) {
         frame_idx = 0;
-        write_listening_status_raw(std::string("[Listening ") + frames[frame_idx] + "]", use_serial);
+        write_listening_status_raw(std::string("\r[Listening ") + frames[frame_idx] + "]", use_serial);
         g_listening_spinner_visible.store(true, std::memory_order_relaxed);
         last_tick = now;
         return;
@@ -69,7 +70,7 @@ static void update_listening_spinner(bool visible, bool use_serial) {
 
     if (now - last_tick < std::chrono::milliseconds(150)) return;
     frame_idx = (frame_idx + 1) % 4;
-    write_listening_status_raw(std::string("\b\b") + frames[frame_idx] + "]", use_serial);
+    write_listening_status_raw(std::string("\r[Listening ") + frames[frame_idx] + "]", use_serial);
     last_tick = now;
 }
 
