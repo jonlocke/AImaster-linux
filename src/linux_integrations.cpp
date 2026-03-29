@@ -381,6 +381,12 @@ bool start_recording_locked(AppConfig& config, std::string& status) {
     }
 
     if (pid == 0) {
+        const int null_fd = open("/dev/null", O_WRONLY);
+        if (null_fd >= 0) {
+            dup2(null_fd, STDOUT_FILENO);
+            dup2(null_fd, STDERR_FILENO);
+            if (null_fd > STDERR_FILENO) close(null_fd);
+        }
         execvp(argv[0], argv.data());
         _exit(127);
     }
