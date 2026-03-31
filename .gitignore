@@ -54,4 +54,5 @@ code/*.txt
 dist/
 ollama_cli
 AImaster
+chat_provider_tests
 rag/6502DevelopmentPackage.pdf

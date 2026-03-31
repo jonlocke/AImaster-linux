@@ -10,6 +10,7 @@ AImaster keeps its existing internal Ollama-style chat history and request flow,
 - `processCommand()` in `src/ollama_client.cpp` routes interactive commands and chat turns.
 - Chat requests are still assembled from AImaster's existing Ollama-style `messages` history.
 - `executeProviderChat()` in `src/chat_provider.cpp` now selects the upstream provider, translates requests, performs the HTTP call, and maps responses back into the Ollama-style assistant message shape AImaster expects.
+- Native tool plugins are registered in `src/tool_plugins.cpp`, exposed through the provider `tools` payload, and executed locally when the LLM returns tool calls.
 - Existing Ollama-native behavior remains the default when `provider_type` is omitted.
 
 ## Configuration
@@ -50,6 +51,12 @@ temperature=0.2
 num_predict=512
 format=json
 extra_header=X-Client: AImaster
+
+# Native tool plugins
+weather_plugin_enabled=true
+weather_geocoding_url=https://geocoding-api.open-meteo.com/v1/search
+weather_forecast_url=https://api.open-meteo.com/v1/forecast
+weather_timeout_seconds=15
 
 # Legacy fields may stay in place; chat uses provider_type/api_base/model when set.
 ollama_url=http://localhost:11434/api/chat
@@ -118,8 +125,17 @@ API keys are never written to logs.
 
 - RAG embedding/model verification still assumes Ollama-hosted embeddings and remains tied to the existing Ollama RAG path.
 - `format` is mapped best-effort for OpenAI-compatible backends. Non-JSON structured output schemas beyond simple JSON mode are not fully translated yet.
-- Tool/function calling fields are passed through where available, but full end-to-end tool execution semantics are not expanded in this patch.
 - OpenAI-compatible model listing depends on `/v1/models` support from the upstream gateway.
+
+## Plugin tools
+
+AImaster now includes a small native plugin framework for LLM tool calling:
+
+- Tools are defined in-process and registered through `buildRegisteredToolDefinitions()`.
+- Chat turns with tools enabled run through a bounded tool loop: assistant tool call -> local plugin execution -> tool result message -> follow-up model call.
+- The built-in `get_weather` plugin calls Open-Meteo over HTTP, resolves a user-supplied place name, and returns current conditions plus a short forecast in JSON.
+
+This means an upstream OpenAI-compatible model or Ollama model with tool-calling support can answer prompts like "what's the weather in Glasgow?" by invoking the local weather plugin instead of hallucinating a forecast.
 
 ## Migration note
 

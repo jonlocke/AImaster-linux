@@ -21,6 +21,12 @@ num_predict=512
 format=json
 extra_header=X-Client: AImaster
 
+# Native tool plugins exposed to the LLM.
+weather_plugin_enabled=true
+weather_geocoding_url=https://geocoding-api.open-meteo.com/v1/search
+weather_forecast_url=https://api.open-meteo.com/v1/forecast
+weather_timeout_seconds=15
+
 rag_chunks=25
 rag_threshold=0.2
 commands_csv=cmds.csv

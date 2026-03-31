@@ -2,8 +2,10 @@ void run_tts_tests();
 
 #include "chat_provider.hpp"
 #include "config_loader.h"
+#include "tool_plugins.hpp"
 
 #include <cassert>
+#include <fstream>
 #include <iostream>
 #include <sstream>
 
@@ -72,6 +74,38 @@ static void test_model_list_parsing() {
     assert(names.size() == 1 && names[0] == "qwen3:4b");
 }
 
+static void test_registered_tool_definitions() {
+    AppConfig cfg;
+    Json::Value tools = buildRegisteredToolDefinitions(cfg);
+    assert(tools.isArray());
+    assert(tools.size() >= 1);
+    assert(tools[0]["type"].asString() == "function");
+    assert(tools[0]["function"]["name"].asString() == "get_weather");
+
+    cfg.weather_plugin_enabled = false;
+    Json::Value disabled = buildRegisteredToolDefinitions(cfg);
+    assert(disabled.isArray());
+    assert(disabled.empty());
+}
+
+static void test_tool_call_extraction() {
+    Json::Value message(Json::objectValue);
+    message["tool_calls"] = Json::arrayValue;
+    Json::Value call(Json::objectValue);
+    call["id"] = "call_123";
+    call["function"] = Json::Value(Json::objectValue);
+    call["function"]["name"] = "get_weather";
+    call["function"]["arguments"] = R"({"location":"London","days":2})";
+    message["tool_calls"].append(call);
+
+    auto invocations = extractPluginInvocations(message);
+    assert(invocations.size() == 1);
+    assert(invocations[0].id == "call_123");
+    assert(invocations[0].name == "get_weather");
+    assert(invocations[0].arguments["location"].asString() == "London");
+    assert(invocations[0].arguments["days"].asInt() == 2);
+}
+
 static void test_config_loader_fallback() {
     AppConfig cfg;
     std::ofstream out("/tmp/aimaster_test_config.txt");
@@ -92,6 +126,8 @@ int main() {
     test_ollama_payload_mapping();
     test_model_list_parsing();
     test_config_loader_fallback();
+    test_registered_tool_definitions();
+    test_tool_call_extraction();
     run_tts_tests();
     std::cout << "chat_provider_tests passed\n";
     return 0;

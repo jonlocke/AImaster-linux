@@ -6,6 +6,7 @@
 #include "rag_int_bridge.hpp"
 #include "utils.h"
 #include "chat_provider.hpp"
+#include "tool_plugins.hpp"
 #include "tts.hpp"
 #include "linux_integrations.hpp"
 #include "hid_button.h"
@@ -134,6 +135,17 @@ bool IsDiagnosticModeEnabled() {
 }
 
 namespace {
+    Json::Value merge_tool_definitions(const Json::Value& configured_tools, const Json::Value& registered_tools) {
+        Json::Value merged(Json::arrayValue);
+        if (configured_tools.isArray()) {
+            for (const auto& tool : configured_tools) merged.append(tool);
+        }
+        if (registered_tools.isArray()) {
+            for (const auto& tool : registered_tools) merged.append(tool);
+        }
+        return merged;
+    }
+
     void saveCodeBlocks(const std::string& text) {
         namespace fs = std::filesystem;
         const std::string delimiter = "```";
@@ -242,11 +254,15 @@ namespace {
 static bool sendMessageToOllama(const std::string& query,
                                 std::vector<Json::Value>& chatHistory,
                                 const AppConfig& config) {
-   diag_log("[DIAG] sendMessage caller src=%d\n", (int)getCurrentCommandSource());
+    diag_log("[DIAG] sendMessage caller src=%d\n", (int)getCurrentCommandSource());
     Json::Value msg;
     msg["role"] = "user";
     msg["content"] = query;
     chatHistory.push_back(msg);
+
+    AppConfig request_config = config;
+    request_config.tools = merge_tool_definitions(config.tools, buildRegisteredToolDefinitions(config));
+    const bool has_tools = request_config.tools.isArray() && !request_config.tools.empty();
 
     StreamData streamData;
     const CommandSource prev = getCurrentCommandSource();
@@ -259,12 +275,58 @@ static bool sendMessageToOllama(const std::string& query,
     std::unique_ptr<StreamingTTSPlayer> tts_player;
     if (config.tts_enabled) tts_player = std::make_unique<StreamingTTSPlayer>(config);
 
-    ChatProviderResult providerResult;
-    const bool ok = executeProviderChat(
-        config,
-        chatHistory,
-        true,
-        [&](const std::string& text) {
+    bool ok = false;
+    bool history_committed = false;
+    constexpr int kMaxToolRounds = 8;
+
+    for (int round = 0; round < kMaxToolRounds; ++round) {
+        ChatProviderResult providerResult;
+        const bool stream_response = !has_tools && round == 0;
+        ok = executeProviderChat(
+            request_config,
+            chatHistory,
+            stream_response,
+            [&](const std::string& text) {
+                if (!streamData.first_chunk_received) {
+                    streamData.first_chunk_received = true;
+                    spinner.stop(true);
+                    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::high_resolution_clock::now() - streamData.start_time
+                    ).count();
+                    route_output(std::string("[Response ") + std::to_string(elapsed) + "ms]", true);
+                }
+                route_output(text);
+                if (!serial_available) {
+                    std::ofstream log("log.txt", std::ios::app);
+                    if (log.is_open()) { log << text; log.flush(); }
+                }
+                streamData.collected += text;
+                if (tts_player) tts_player->pushText(text);
+            },
+            [&](const std::string& line) {
+                diag_log("%s\n", line.c_str());
+            },
+            providerResult
+        );
+
+        if (!ok) {
+            if (!streamData.first_chunk_received) spinner.stop(true);
+            route_output(std::string("[Error] ") + providerResult.error_message, true);
+            if (providerResult.stream_interrupted) route_output("[Warning] Upstream stream ended early; partial output may be incomplete.", true);
+            if (!history_committed && !chatHistory.empty()) chatHistory.pop_back();
+            setCurrentCommandSource(prev);
+            if (tts_player) tts_player->finish();
+            return false;
+        }
+
+        Json::Value reply = providerResult.assistant_message;
+        if (!reply.isObject()) reply = Json::Value(Json::objectValue);
+        reply["role"] = reply.get("role", "assistant");
+        reply["content"] = providerResult.assistant_content;
+        if (!providerResult.usage.isNull()) reply["usage"] = providerResult.usage;
+
+        const std::vector<PluginInvocation> invocations = extractPluginInvocations(reply);
+        if (!invocations.empty()) {
             if (!streamData.first_chunk_received) {
                 streamData.first_chunk_received = true;
                 spinner.stop(true);
@@ -273,40 +335,54 @@ static bool sendMessageToOllama(const std::string& query,
                 ).count();
                 route_output(std::string("[Response ") + std::to_string(elapsed) + "ms]", true);
             }
-            route_output(text);
-            if (!serial_available) {
-                std::ofstream log("log.txt", std::ios::app);
-                if (log.is_open()) { log << text; log.flush(); }
+
+            chatHistory.push_back(reply);
+            history_committed = true;
+            for (const auto& invocation : invocations) {
+                route_output(std::string("[Tool] ") + invocation.name, true);
+                const PluginResult tool_result = executePluginInvocation(invocation, config);
+                chatHistory.push_back(buildPluginResultMessage(invocation, tool_result));
             }
-            streamData.collected += text;
-            if (tts_player) tts_player->pushText(text);
-        },
-        [&](const std::string& line) {
-            diag_log("%s\n", line.c_str());
-        },
-        providerResult
-    );
+            continue;
+        }
 
-    if (!streamData.first_chunk_received) spinner.stop(true);
-    route_output("", true);
-    setCurrentCommandSource(prev);
-    if (tts_player) tts_player->finish();
+        if (!stream_response) {
+            if (!streamData.first_chunk_received) {
+                streamData.first_chunk_received = true;
+                spinner.stop(true);
+                auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::high_resolution_clock::now() - streamData.start_time
+                ).count();
+                route_output(std::string("[Response ") + std::to_string(elapsed) + "ms]", true);
+            }
+            if (!providerResult.assistant_content.empty()) {
+                route_output(providerResult.assistant_content);
+                if (!serial_available) {
+                    std::ofstream log("log.txt", std::ios::app);
+                    if (log.is_open()) {
+                        log << providerResult.assistant_content;
+                        log.flush();
+                    }
+                }
+                if (tts_player) tts_player->pushText(providerResult.assistant_content);
+            }
+        }
 
-    if (!ok) {
-        route_output(std::string("[Error] ") + providerResult.error_message, true);
-        if (providerResult.stream_interrupted) route_output("[Warning] Upstream stream ended early; partial output may be incomplete.", true);
-        chatHistory.pop_back();
-        return false;
+        if (!streamData.first_chunk_received) spinner.stop(true);
+        route_output("", true);
+        setCurrentCommandSource(prev);
+        if (tts_player) tts_player->finish();
+
+        chatHistory.push_back(reply);
+        saveCodeBlocks(providerResult.assistant_content);
+        return true;
     }
 
-    Json::Value reply = providerResult.assistant_message;
-    if (!reply.isObject()) reply = Json::Value(Json::objectValue);
-    reply["role"] = reply.get("role", "assistant");
-    reply["content"] = providerResult.assistant_content;
-    if (!providerResult.usage.isNull()) reply["usage"] = providerResult.usage;
-    chatHistory.push_back(reply);
-    saveCodeBlocks(providerResult.assistant_content);
-    return true;
+    if (!streamData.first_chunk_received) spinner.stop(true);
+    route_output("[Error] Tool execution exceeded maximum rounds.", true);
+    setCurrentCommandSource(prev);
+    if (tts_player) tts_player->finish();
+    return false;
 }
 
 
@@ -638,6 +714,10 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
         result["ollama_timeout_seconds"] = Json::Value(static_cast<Json::UInt64>(config.ollama_timeout_seconds));
         result["rag_chunks"] = config.rag_chunks;
         result["rag_threshold"] = config.rag_threshold;
+        result["weather_plugin_enabled"] = config.weather_plugin_enabled;
+        result["weather_geocoding_url"] = config.weather_geocoding_url;
+        result["weather_forecast_url"] = config.weather_forecast_url;
+        result["weather_timeout_seconds"] = Json::Value(static_cast<Json::UInt64>(config.weather_timeout_seconds));
         result["tts_enabled"] = config.tts_enabled;
         result["tts_endpoint_url"] = config.tts_endpoint_url;
         result["tts_timeout_seconds"] = Json::Value(static_cast<Json::UInt64>(config.tts_timeout_seconds));
@@ -651,6 +731,9 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
         route_output(std::string("\tAPI base: ") + effectiveApiBase(config), true);
         route_output(std::string("\tModel: ") + effectiveModel(config), true);
         route_output(std::string("\tTimeout (s): ") + std::to_string(effectiveTimeoutSeconds(config)), true);
+        route_output(std::string("\tWeather plugin: ") + (config.weather_plugin_enabled ? "enabled" : "disabled"), true);
+        route_output(std::string("\tWeather geocoding URL: ") + config.weather_geocoding_url, true);
+        route_output(std::string("\tWeather forecast URL: ") + config.weather_forecast_url, true);
         route_output(std::string("\tLegacy Ollama URL: ") + config.ollama_url, true);
         route_output(std::string("\tRAG chunks (ASK/INT): ") + std::to_string(config.rag_chunks), true);
         route_output(std::string("\tRAG threshold (ASK/INT): ") + std::to_string(config.rag_threshold), true);

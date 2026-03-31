@@ -97,6 +97,10 @@ bool loadConfig(const std::string& path, AppConfig& out) {
         else if (key == "temperature") { double v; if (parse_double(val, v)) out.temperature = v; }
         else if (key == "num_predict") { int v; if (parse_int(val, v) && v>0) out.num_predict = v; }
         else if (key == "format") out.format = val;
+        else if (key == "weather_plugin_enabled") { bool v; if (parse_bool(val, v)) out.weather_plugin_enabled = v; }
+        else if (key == "weather_geocoding_url") out.weather_geocoding_url = val;
+        else if (key == "weather_forecast_url") out.weather_forecast_url = val;
+        else if (key == "weather_timeout_seconds") { long v; if (parse_long(val, v) && v > 0) out.weather_timeout_seconds = v; }
         else if (key == "tts_endpoint_url") out.tts_endpoint_url = val;
         else if (key == "tts_timeout_seconds") { long v; if (parse_long(val, v) && v > 0) out.tts_timeout_seconds = v; }
         else if (key == "tts_voice") out.tts_voice = val;
@@ -164,6 +168,10 @@ bool saveConfig(const std::string& path, const AppConfig& cfg) {
     if (cfg.temperature >= 0.0) out << "temperature=" << cfg.temperature << "\n";
     if (cfg.num_predict > 0) out << "num_predict=" << cfg.num_predict << "\n";
     if (!cfg.format.empty()) out << "format=" << cfg.format << "\n";
+    out << "weather_plugin_enabled=" << (cfg.weather_plugin_enabled ? "true" : "false") << "\n";
+    if (!cfg.weather_geocoding_url.empty()) out << "weather_geocoding_url=" << cfg.weather_geocoding_url << "\n";
+    if (!cfg.weather_forecast_url.empty()) out << "weather_forecast_url=" << cfg.weather_forecast_url << "\n";
+    out << "weather_timeout_seconds=" << cfg.weather_timeout_seconds << "\n";
     out << "tts_enabled=" << (cfg.tts_enabled ? "true" : "false") << "\n";
     out << "tts_endpoint_url=" << cfg.tts_endpoint_url << "\n";
     out << "tts_timeout_seconds=" << cfg.tts_timeout_seconds << "\n";

@@ -33,6 +33,10 @@ struct AppConfig {
     std::string format;
     Json::Value tools;
     Json::Value tool_choice;
+    bool weather_plugin_enabled = true;
+    std::string weather_geocoding_url = "https://geocoding-api.open-meteo.com/v1/search";
+    std::string weather_forecast_url = "https://api.open-meteo.com/v1/forecast";
+    long weather_timeout_seconds = 15;
 
     // Text-to-speech
     bool tts_enabled = false;
