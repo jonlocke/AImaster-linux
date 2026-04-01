@@ -136,6 +136,24 @@ bool IsDiagnosticModeEnabled() {
 }
 
 namespace {
+    std::string load_prompt_file_contents(const std::string& configured_path) {
+        std::vector<std::string> candidates;
+        if (!configured_path.empty()) candidates.push_back(configured_path);
+        candidates.push_back("/usr/share/aimaster/user_prompt.txt");
+        candidates.push_back("assets/user_prompt.txt");
+
+        for (const auto& path : candidates) {
+            if (path.empty()) continue;
+            std::ifstream in(path);
+            if (!in) continue;
+            std::stringstream buffer;
+            buffer << in.rdbuf();
+            const std::string content = buffer.str();
+            if (!content.empty()) return content;
+        }
+        return "";
+    }
+
     Json::Value merge_tool_definitions(const Json::Value& configured_tools, const Json::Value& registered_tools) {
         Json::Value merged(Json::arrayValue);
         if (configured_tools.isArray()) {
@@ -152,6 +170,17 @@ namespace {
         msg["role"] = role;
         msg["content"] = content;
         return msg;
+    }
+
+    void ensure_session_prompt(std::vector<Json::Value>& chat_history, const AppConfig& config) {
+        if (!chat_history.empty()) {
+            const Json::Value& first = chat_history.front();
+            if (first.isObject() && first.get("role", "").asString() == "system") return;
+        }
+
+        const std::string prompt = load_prompt_file_contents(config.user_prompt_file);
+        if (prompt.empty()) return;
+        chat_history.insert(chat_history.begin(), make_message("system", prompt));
     }
 
     Json::Value make_tool_call_assistant_message(const ToolPromptDecision& decision, const std::string& tool_call_id) {
@@ -328,6 +357,7 @@ static bool sendMessageToOllama(const std::string& query,
                                 std::vector<Json::Value>& chatHistory,
                                 const AppConfig& config) {
     diag_log("[DIAG] sendMessage caller src=%d\n", (int)getCurrentCommandSource());
+    ensure_session_prompt(chatHistory, config);
     const std::size_t history_start = chatHistory.size();
     Json::Value msg;
     msg["role"] = "user";
@@ -873,6 +903,7 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
         result["ollama_timeout_seconds"] = Json::Value(static_cast<Json::UInt64>(config.ollama_timeout_seconds));
         result["rag_chunks"] = config.rag_chunks;
         result["rag_threshold"] = config.rag_threshold;
+        result["user_prompt_file"] = config.user_prompt_file;
         result["weather_plugin_enabled"] = config.weather_plugin_enabled;
         result["weather_geocoding_url"] = config.weather_geocoding_url;
         result["weather_forecast_url"] = config.weather_forecast_url;
@@ -890,6 +921,7 @@ Json::Value processCommand(const std::string& command, AppConfig& config) {
         route_output(std::string("\tAPI base: ") + effectiveApiBase(config), true);
         route_output(std::string("\tModel: ") + effectiveModel(config), true);
         route_output(std::string("\tTimeout (s): ") + std::to_string(effectiveTimeoutSeconds(config)), true);
+        route_output(std::string("\tUser prompt file: ") + config.user_prompt_file, true);
         route_output(std::string("\tWeather plugin: ") + (config.weather_plugin_enabled ? "enabled" : "disabled"), true);
         route_output(std::string("\tWeather geocoding URL: ") + config.weather_geocoding_url, true);
         route_output(std::string("\tWeather forecast URL: ") + config.weather_forecast_url, true);

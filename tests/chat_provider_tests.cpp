@@ -17,6 +17,7 @@ static void test_config_defaults() {
     assert(effectiveModel(cfg) == "gemma3:4b");
     assert(effectiveTimeoutSeconds(cfg) == 5);
     assert(effectiveChatUrl(cfg) == "http://localhost:11434/api/chat");
+    assert(cfg.user_prompt_file == "/usr/share/aimaster/user_prompt.txt");
 }
 
 static void test_openai_payload_mapping() {
@@ -160,12 +161,14 @@ static void test_config_loader_fallback() {
     out << "ollama_url=http://legacy-host:11434/api/chat\n";
     out << "ollama_model=legacy-model\n";
     out << "ollama_timeout_seconds=9\n";
+    out << "user_prompt_file=/tmp/custom_prompt.txt\n";
     out.close();
     assert(loadConfig("/tmp/aimaster_test_config.txt", cfg));
     assert(effectiveProviderType(cfg) == "ollama_native");
     assert(effectiveApiBase(cfg) == "http://legacy-host:11434/api/chat");
     assert(effectiveModel(cfg) == "legacy-model");
     assert(effectiveTimeoutSeconds(cfg) == 9);
+    assert(cfg.user_prompt_file == "/tmp/custom_prompt.txt");
 }
 
 int main() {

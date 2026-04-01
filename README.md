@@ -25,6 +25,7 @@ serial_port=/dev/ttyUSB0
 baudrate=2400
 serial_delay_ms=50
 serial_newline=CRLF
+user_prompt_file=/usr/share/aimaster/user_prompt.txt
 
 provider_type=ollama_native
 ollama_url=http://localhost:11434/api/chat
@@ -48,6 +49,7 @@ api_base=http://localhost:4000
 api_key=sk-example
 model=gpt-4o-mini
 timeout=30
+user_prompt_file=/usr/share/aimaster/user_prompt.txt
 temperature=0.2
 num_predict=512
 format=json
@@ -139,6 +141,15 @@ AImaster now includes a small native plugin framework for LLM tool calling:
 - The built-in `get_weather` plugin calls Open-Meteo over HTTP, resolves a user-supplied place name, and returns current conditions plus a short forecast in JSON.
 
 This means an upstream OpenAI-compatible model or Ollama model with tool-calling support can answer prompts like "what's the weather in Glasgow?" by invoking the local weather plugin instead of hallucinating a forecast.
+
+## Session prompt file
+
+AImaster now loads its default session prompt from a text file instead of compiling it into the binary.
+
+- The config key is `user_prompt_file`.
+- The packaged default path is `/usr/share/aimaster/user_prompt.txt`.
+- For local development, `assets/user_prompt.txt` is used as a fallback.
+- The prompt is injected as a `system` message into shared chat history before `ASK` and `INT` traffic is sent to the LLM.
 
 ## Migration note
 

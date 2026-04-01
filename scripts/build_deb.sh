@@ -66,6 +66,7 @@ install -m 0755 "$ROOT_DIR/packaging/systemd/aimaster-service.sh" "$PKG_ROOT/usr
 install -m 0644 "$ROOT_DIR/config-example.txt" "$PKG_ROOT/usr/share/aimaster/config-example.txt"
 install -m 0644 "$ROOT_DIR/cmds.csv" "$PKG_ROOT/usr/share/aimaster/cmds.csv"
 install -m 0644 "$ROOT_DIR/assets/welcome.txt" "$PKG_ROOT/usr/share/aimaster/welcome.txt"
+install -m 0644 "$ROOT_DIR/assets/user_prompt.txt" "$PKG_ROOT/usr/share/aimaster/user_prompt.txt"
 install -m 0644 "$ROOT_DIR/README.md" "$PKG_ROOT/usr/share/doc/aimaster/README.md"
 install -m 0644 "$ROOT_DIR/LICENSE" "$PKG_ROOT/usr/share/doc/aimaster/LICENSE"
 install -m 0755 "$ROOT_DIR/packaging/debian/postinst" "$DEBIAN_DIR/postinst"

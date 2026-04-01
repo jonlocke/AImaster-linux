@@ -84,6 +84,7 @@ bool loadConfig(const std::string& path, AppConfig& out) {
         else if (key == "serial_delay_ms") { int v; if (parse_int(val, v) && v>=0) out.serial_delay_ms = v; }
         else if (key == "serial_newline")  { out.serial_newline = val; }
         else if (key == "welcome_message_file") { out.welcome_message_file = val; }
+        else if (key == "user_prompt_file") { out.user_prompt_file = val; }
         else if (key == "ollama_url")  out.ollama_url = val;
         else if (key == "ollama_model") out.ollama_model = val;
         else if (key == "ollama_timeout_seconds") { long v; if (parse_long(val, v) && v>=0) out.ollama_timeout_seconds = v; }
@@ -155,6 +156,7 @@ bool saveConfig(const std::string& path, const AppConfig& cfg) {
     out << "serial_delay_ms=" << cfg.serial_delay_ms << "\n";
     out << "serial_newline=" << cfg.serial_newline << "\n";
     out << "welcome_message_file=" << cfg.welcome_message_file << "\n";
+    out << "user_prompt_file=" << cfg.user_prompt_file << "\n";
     out << "ollama_url=" << cfg.ollama_url << "\n";
     out << "ollama_model=" << cfg.ollama_model << "\n";
     out << "ollama_timeout_seconds=" << cfg.ollama_timeout_seconds << "\n";
