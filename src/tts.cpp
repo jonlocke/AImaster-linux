@@ -34,6 +34,19 @@ std::string uppercase_copy(std::string s) {
     return s;
 }
 
+std::string log_preview(const std::string& text, std::size_t max_len = 80) {
+    std::string out;
+    out.reserve(std::min(text.size(), max_len));
+    for (unsigned char c : text) {
+        if (c == '\n' || c == '\r' || c == '\t') out.push_back(' ');
+        else out.push_back(static_cast<char>(c));
+        if (out.size() >= max_len) break;
+    }
+    out = trim_copy(out);
+    if (text.size() > max_len) out += "...";
+    return out;
+}
+
 
 std::string appendQueryParam(const std::string& url, const std::string& key, const std::string& value) {
     return url + (url.find('?') == std::string::npos ? "?" : "&") + key + "=" + value;
@@ -760,6 +773,7 @@ static bool speakTextNow(const std::string& text, const AppConfig& config) {
     if (!config.tts_enabled) return true;
     if (trim_copy(text).empty()) return true;
 
+    const auto started_at = std::chrono::steady_clock::now();
     CURL* curl = curl_easy_init();
     if (!curl) {
         std::cerr << "[Warn] TTS unavailable: curl init failed\n";
@@ -791,12 +805,27 @@ static bool speakTextNow(const std::string& text, const AppConfig& config) {
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
 
+    const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - started_at
+    ).count();
+    const std::string preview = log_preview(text);
+
     if (res != CURLE_OK) {
-        std::cerr << "[Warn] TTS request failed: " << curl_easy_strerror(res) << "\n";
+        std::cerr << "[Warn] TTS request failed after "
+                  << elapsed_ms << "ms"
+                  << " (timeout=" << config.tts_timeout_seconds << "s"
+                  << ", url=" << request_url
+                  << ", text=\"" << preview << "\"): "
+                  << curl_easy_strerror(res) << "\n";
         return false;
     }
     if (http_status < 200 || http_status >= 300) {
-        std::cerr << "[Warn] TTS request failed: HTTP " << http_status << "\n";
+        std::cerr << "[Warn] TTS request failed after "
+                  << elapsed_ms << "ms"
+                  << " (timeout=" << config.tts_timeout_seconds << "s"
+                  << ", url=" << request_url
+                  << ", http=" << http_status
+                  << ", text=\"" << preview << "\")\n";
         return false;
     }
 
@@ -805,7 +834,10 @@ static bool speakTextNow(const std::string& text, const AppConfig& config) {
     std::vector<std::vector<unsigned char>> audio_chunks;
     if (content_type == "application/x-ndjson" || response.find("\"audio_b64_wav\"") != std::string::npos) {
         if (!parseStreamedAudioChunks(response, audio_chunks, error)) {
-            std::cerr << "[Warn] TTS response invalid: " << error << "\n";
+            std::cerr << "[Warn] TTS response invalid"
+                      << " (url=" << request_url
+                      << ", text=\"" << preview << "\"): "
+                      << error << "\n";
             return false;
         }
     } else if (content_type.rfind("audio/", 0) == 0 || content_type == "application/octet-stream" || looks_like_wav) {
@@ -813,7 +845,10 @@ static bool speakTextNow(const std::string& text, const AppConfig& config) {
     } else {
         TTSResponseAudio audio;
         if (!decodeBase64AudioResponse(response, audio, error)) {
-            std::cerr << "[Warn] TTS response invalid: " << error << "\n";
+            std::cerr << "[Warn] TTS response invalid"
+                      << " (url=" << request_url
+                      << ", text=\"" << preview << "\"): "
+                      << error << "\n";
             return false;
         }
         audio_chunks.push_back(std::move(audio.audio_bytes));
@@ -822,7 +857,10 @@ static bool speakTextNow(const std::string& text, const AppConfig& config) {
     std::string backend_used;
     for (const auto& chunk : audio_chunks) {
         if (!playAudioBytes(chunk, config, backend_used, error)) {
-            std::cerr << "[Warn] TTS playback failed: " << error << "\n";
+            std::cerr << "[Warn] TTS playback failed"
+                      << " (backend=" << (backend_used.empty() ? "unknown" : backend_used)
+                      << ", text=\"" << preview << "\"): "
+                      << error << "\n";
             return false;
         }
     }
