@@ -2,6 +2,7 @@ void run_tts_tests();
 
 #include "chat_provider.hpp"
 #include "config_loader.h"
+#include "tool_prompting.hpp"
 #include "tool_plugins.hpp"
 
 #include <cassert>
@@ -106,6 +107,53 @@ static void test_tool_call_extraction() {
     assert(invocations[0].arguments["days"].asInt() == 2);
 }
 
+static void test_tool_selection_prompt_building() {
+    AppConfig cfg;
+    Json::Value tools = buildRegisteredToolDefinitions(cfg);
+    Json::Value specs = buildToolSelectionSpecs(tools);
+    std::string prompt = buildToolSelectionPrompt(specs, "what is the weather in London?");
+    assert(prompt.find("You are a tool selector") != std::string::npos);
+    assert(prompt.find("{\"tool\":null,\"arguments\":{}}") != std::string::npos);
+    assert(prompt.find("get_weather") != std::string::npos);
+    assert(prompt.find("what is the weather in London?") != std::string::npos);
+}
+
+static void test_tool_selection_response_parsing() {
+    ToolPromptDecision no_tool = parseToolSelectionResponse(R"({"tool":null,"arguments":{}})");
+    assert(no_tool.valid);
+    assert(!no_tool.use_tool);
+
+    ToolPromptDecision aliased = parseToolSelectionResponse(
+        "```json\n{\"tool\":\"Weather\",\"arguments\":{\"location\":\"London\"}}\n```"
+    );
+    assert(aliased.valid);
+    assert(aliased.use_tool);
+    assert(aliased.tool_name == "get_weather");
+    assert(aliased.arguments["location"].asString() == "London");
+
+    ToolPromptDecision inferred = parseToolSelectionResponse(
+        "I should call {\"tool\":\"get_current_weather\",\"location\":\"Seattle\"} before answering."
+    );
+    assert(inferred.valid);
+    assert(inferred.use_tool);
+    assert(inferred.tool_name == "get_weather");
+    assert(inferred.arguments["location"].asString() == "Seattle");
+}
+
+static void test_tool_result_prompt_building() {
+    Json::Value args(Json::objectValue);
+    args["location"] = "London";
+    Json::Value result(Json::objectValue);
+    result["ok"] = false;
+    result["tool_name"] = "get_weather";
+    result["error"] = "location is required";
+
+    std::string prompt = buildToolResultPrompt("weather please", "get_weather", args, result);
+    assert(prompt.find("exactly two sentences") != std::string::npos);
+    assert(prompt.find("get_weather") != std::string::npos);
+    assert(prompt.find("location is required") != std::string::npos);
+}
+
 static void test_config_loader_fallback() {
     AppConfig cfg;
     std::ofstream out("/tmp/aimaster_test_config.txt");
@@ -128,6 +176,9 @@ int main() {
     test_config_loader_fallback();
     test_registered_tool_definitions();
     test_tool_call_extraction();
+    test_tool_selection_prompt_building();
+    test_tool_selection_response_parsing();
+    test_tool_result_prompt_building();
     run_tts_tests();
     std::cout << "chat_provider_tests passed\n";
     return 0;

@@ -11,6 +11,7 @@ AImaster keeps its existing internal Ollama-style chat history and request flow,
 - Chat requests are still assembled from AImaster's existing Ollama-style `messages` history.
 - `executeProviderChat()` in `src/chat_provider.cpp` now selects the upstream provider, translates requests, performs the HTTP call, and maps responses back into the Ollama-style assistant message shape AImaster expects.
 - Native tool plugins are registered in `src/tool_plugins.cpp`, exposed through the provider `tools` payload, and executed locally when the LLM returns tool calls.
+- A Holly-style app-side selector prompt now runs ahead of tool-capable turns so even models without strong native tool calling can emit a constrained JSON tool decision that AImaster executes locally.
 - Existing Ollama-native behavior remains the default when `provider_type` is omitted.
 
 ## Configuration
@@ -132,7 +133,9 @@ API keys are never written to logs.
 AImaster now includes a small native plugin framework for LLM tool calling:
 
 - Tools are defined in-process and registered through `buildRegisteredToolDefinitions()`.
-- Chat turns with tools enabled run through a bounded tool loop: assistant tool call -> local plugin execution -> tool result message -> follow-up model call.
+- Chat turns with tools enabled first run through a Holly-style selector prompt that requires the model to return only `{"tool":...,"arguments":...}` JSON.
+- If the selector chooses a tool, AImaster executes it locally, injects the tool result, and issues a constrained follow-up prompt for the final answer.
+- If the selector does not choose a tool or the selector output is unusable, AImaster falls back to the upstream model's normal response path, including native tool calls when supported.
 - The built-in `get_weather` plugin calls Open-Meteo over HTTP, resolves a user-supplied place name, and returns current conditions plus a short forecast in JSON.
 
 This means an upstream OpenAI-compatible model or Ollama model with tool-calling support can answer prompts like "what's the weather in Glasgow?" by invoking the local weather plugin instead of hallucinating a forecast.

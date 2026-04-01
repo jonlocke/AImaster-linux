@@ -6,6 +6,7 @@
 #include "rag_int_bridge.hpp"
 #include "utils.h"
 #include "chat_provider.hpp"
+#include "tool_prompting.hpp"
 #include "tool_plugins.hpp"
 #include "tts.hpp"
 #include "linux_integrations.hpp"
@@ -146,6 +147,78 @@ namespace {
         return merged;
     }
 
+    Json::Value make_message(const std::string& role, const std::string& content) {
+        Json::Value msg(Json::objectValue);
+        msg["role"] = role;
+        msg["content"] = content;
+        return msg;
+    }
+
+    Json::Value make_tool_call_assistant_message(const ToolPromptDecision& decision, const std::string& tool_call_id) {
+        Json::Value msg(Json::objectValue);
+        msg["role"] = "assistant";
+        msg["content"] = "";
+        msg["tool_calls"] = Json::arrayValue;
+        Json::Value call(Json::objectValue);
+        call["id"] = tool_call_id;
+        call["type"] = "function";
+        call["function"] = Json::Value(Json::objectValue);
+        call["function"]["name"] = decision.tool_name;
+        Json::StreamWriterBuilder writer;
+        writer["indentation"] = "";
+        call["function"]["arguments"] = Json::writeString(writer, decision.arguments);
+        msg["tool_calls"].append(call);
+        return msg;
+    }
+
+    Json::Value plugin_result_to_json(const PluginResult& result, const std::string& tool_name) {
+        Json::Value payload(Json::objectValue);
+        Json::CharReaderBuilder reader;
+        std::string errors;
+        std::istringstream ss(result.content);
+        if (Json::parseFromStream(reader, ss, &payload, &errors) && payload.isObject()) {
+            if (!payload.isMember("tool_name")) payload["tool_name"] = tool_name;
+            return payload;
+        }
+        payload = Json::Value(Json::objectValue);
+        payload["ok"] = result.success;
+        payload["tool_name"] = tool_name;
+        if (result.success) payload["content"] = result.content;
+        else payload["error"] = result.error_message.empty() ? result.content : result.error_message;
+        return payload;
+    }
+
+    ToolPromptDecision select_tool_with_prompt(const std::vector<Json::Value>& chat_history,
+                                               const std::string& user_query,
+                                               const AppConfig& config,
+                                               const Json::Value& merged_tools,
+                                               const ChatLogEmitter& on_log) {
+        ToolPromptDecision decision;
+        const Json::Value tool_specs = buildToolSelectionSpecs(merged_tools);
+        if (!tool_specs.isArray() || tool_specs.empty()) return decision;
+
+        std::vector<Json::Value> selector_history = chat_history;
+        selector_history.push_back(make_message("user", buildToolSelectionPrompt(tool_specs, user_query)));
+
+        AppConfig selector_config = config;
+        selector_config.tools = Json::Value();
+        selector_config.tool_choice = Json::Value();
+
+        ChatProviderResult selector_result;
+        if (!executeProviderChat(selector_config, selector_history, false, ChatStreamEmitter(), on_log, selector_result)) {
+            if (on_log) on_log("[Debug] Tool selector prompt failed; falling back to normal chat flow.");
+            return decision;
+        }
+
+        decision = parseToolSelectionResponse(selector_result.assistant_content);
+        if (on_log) {
+            on_log(std::string("[Debug] Tool selector result valid=") + (decision.valid ? "true" : "false") +
+                   ", use_tool=" + (decision.use_tool ? "true" : "false") +
+                   (decision.tool_name.empty() ? "" : ", tool=" + decision.tool_name));
+        }
+        return decision;
+    }
+
     void saveCodeBlocks(const std::string& text) {
         namespace fs = std::filesystem;
         const std::string delimiter = "```";
@@ -255,6 +328,7 @@ static bool sendMessageToOllama(const std::string& query,
                                 std::vector<Json::Value>& chatHistory,
                                 const AppConfig& config) {
     diag_log("[DIAG] sendMessage caller src=%d\n", (int)getCurrentCommandSource());
+    const std::size_t history_start = chatHistory.size();
     Json::Value msg;
     msg["role"] = "user";
     msg["content"] = query;
@@ -280,6 +354,90 @@ static bool sendMessageToOllama(const std::string& query,
     constexpr int kMaxToolRounds = 8;
 
     for (int round = 0; round < kMaxToolRounds; ++round) {
+        if (round == 0 && has_tools) {
+            const ToolPromptDecision decision = select_tool_with_prompt(
+                std::vector<Json::Value>(chatHistory.begin(), chatHistory.end() - 1),
+                query,
+                config,
+                request_config.tools,
+                [&](const std::string& line) {
+                    diag_log("%s\n", line.c_str());
+                }
+            );
+
+            if (decision.valid && decision.use_tool) {
+                const std::string tool_call_id = "call_local_" + std::to_string(history_start + 1);
+                const PluginResult tool_result = executePluginInvocation(
+                    PluginInvocation{tool_call_id, decision.tool_name, decision.arguments},
+                    config
+                );
+                chatHistory.push_back(make_tool_call_assistant_message(decision, tool_call_id));
+                chatHistory.push_back(buildPluginResultMessage(PluginInvocation{tool_call_id, decision.tool_name, decision.arguments}, tool_result));
+
+                std::vector<Json::Value> followup_history = chatHistory;
+                followup_history.push_back(make_message(
+                    "user",
+                    buildToolResultPrompt(query, decision.tool_name, decision.arguments, plugin_result_to_json(tool_result, decision.tool_name))
+                ));
+
+                AppConfig followup_config = request_config;
+                followup_config.tools = Json::Value();
+                followup_config.tool_choice = Json::Value();
+
+                ChatProviderResult providerResult;
+                ok = executeProviderChat(
+                    followup_config,
+                    followup_history,
+                    true,
+                    [&](const std::string& text) {
+                        if (!streamData.first_chunk_received) {
+                            streamData.first_chunk_received = true;
+                            spinner.stop(true);
+                            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                std::chrono::high_resolution_clock::now() - streamData.start_time
+                            ).count();
+                            route_output(std::string("[Response ") + std::to_string(elapsed) + "ms]", true);
+                        }
+                        route_output(text);
+                        if (!serial_available) {
+                            std::ofstream log("log.txt", std::ios::app);
+                            if (log.is_open()) { log << text; log.flush(); }
+                        }
+                        streamData.collected += text;
+                        if (tts_player) tts_player->pushText(text);
+                    },
+                    [&](const std::string& line) {
+                        diag_log("%s\n", line.c_str());
+                    },
+                    providerResult
+                );
+
+                if (!ok) {
+                    if (!streamData.first_chunk_received) spinner.stop(true);
+                    route_output(std::string("[Error] ") + providerResult.error_message, true);
+                    if (providerResult.stream_interrupted) route_output("[Warning] Upstream stream ended early; partial output may be incomplete.", true);
+                    chatHistory.resize(history_start);
+                    setCurrentCommandSource(prev);
+                    if (tts_player) tts_player->finish();
+                    return false;
+                }
+
+                Json::Value reply = providerResult.assistant_message;
+                if (!reply.isObject()) reply = Json::Value(Json::objectValue);
+                reply["role"] = reply.get("role", "assistant");
+                reply["content"] = providerResult.assistant_content;
+                if (!providerResult.usage.isNull()) reply["usage"] = providerResult.usage;
+
+                if (!streamData.first_chunk_received) spinner.stop(true);
+                route_output("", true);
+                setCurrentCommandSource(prev);
+                if (tts_player) tts_player->finish();
+                chatHistory.push_back(reply);
+                saveCodeBlocks(providerResult.assistant_content);
+                return true;
+            }
+        }
+
         ChatProviderResult providerResult;
         const bool stream_response = !has_tools && round == 0;
         ok = executeProviderChat(
@@ -313,7 +471,7 @@ static bool sendMessageToOllama(const std::string& query,
             if (!streamData.first_chunk_received) spinner.stop(true);
             route_output(std::string("[Error] ") + providerResult.error_message, true);
             if (providerResult.stream_interrupted) route_output("[Warning] Upstream stream ended early; partial output may be incomplete.", true);
-            if (!history_committed && !chatHistory.empty()) chatHistory.pop_back();
+            if (!history_committed) chatHistory.resize(history_start);
             setCurrentCommandSource(prev);
             if (tts_player) tts_player->finish();
             return false;
@@ -380,6 +538,7 @@ static bool sendMessageToOllama(const std::string& query,
 
     if (!streamData.first_chunk_received) spinner.stop(true);
     route_output("[Error] Tool execution exceeded maximum rounds.", true);
+    chatHistory.resize(history_start);
     setCurrentCommandSource(prev);
     if (tts_player) tts_player->finish();
     return false;
